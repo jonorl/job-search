@@ -11,6 +11,7 @@ import yaml
 
 from . import db
 from .filters import reject_reason
+from .llm import QuotaExhausted
 from .score import JobScore, score_jobs
 from .sources import enrich, fetch_all
 from .tailor import tailor
@@ -56,7 +57,7 @@ def cmd_score(conn: sqlite3.Connection, config: dict, cv: dict, limit: int | Non
             ORDER BY posted_at DESC NULLS LAST LIMIT ?""",
         (*statuses, limit or cfg["max_per_run"]),
     ).fetchall()
-    log.info("scoring %d jobs with %s", len(rows), cfg["model"])
+    log.info("scoring %d jobs with %s", len(rows), cfg["models"][0])
     lock = threading.Lock()
 
     def on_scored(row, result: JobScore) -> None:
@@ -66,7 +67,10 @@ def cmd_score(conn: sqlite3.Connection, config: dict, cv: dict, limit: int | Non
         with lock:
             db.set_score(conn, row["id"], score, result.model_dump())
 
-    score_jobs(rows, cv, cfg, config["search"], on_scored)
+    try:
+        score_jobs(rows, cv, cfg, config["search"], on_scored)
+    except QuotaExhausted as e:
+        log.warning("every scoring model is out of quota for today (%s); the rest stay queued", e)
 
 
 def cmd_top(conn: sqlite3.Connection, config: dict, n: int | None) -> None:
@@ -101,7 +105,11 @@ def cmd_tailor(conn: sqlite3.Connection, config: dict, cv: dict, n: int | None, 
     out_root = ROOT / "output" / date.today().isoformat()
     for row in rows:
         log.info("tailoring %s: %s at %s", row["id"], row["title"], row["company"])
-        out = tailor(row, cv, config["tailoring"], out_root)
+        try:
+            out = tailor(row, cv, config["tailoring"], out_root)
+        except QuotaExhausted as e:
+            log.warning("every tailoring model is out of quota for today (%s); the rest stay queued", e)
+            return
         if out is None:
             log.warning("could not tailor %s; it stays in the queue", row["id"])
             continue

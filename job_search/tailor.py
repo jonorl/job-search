@@ -198,7 +198,7 @@ def _assemble(cv: dict, t: TailoredCV) -> tuple[dict, dict[str, tuple[str, str]]
     return data, lines
 
 
-def _report(model: str, system: str, prompt: str, ids) -> dict[str, str]:
+def _report(model: list[str], system: str, prompt: str, ids) -> dict[str, str]:
     result = generate(model, system, prompt, FactCheck, thinking="MEDIUM")
     if result is None:
         # An unchecked application is worse than a plain one, so treat every line as suspect.
@@ -206,20 +206,20 @@ def _report(model: str, system: str, prompt: str, ids) -> dict[str, str]:
     return {p.id: p.issue for p in result.problems if p.id in ids}
 
 
-def _check(model: str, cv_text: str, advert: str, lines: dict[str, str]) -> dict[str, str]:
+def _check(model: list[str], cv_text: str, advert: str, lines: dict[str, str]) -> dict[str, str]:
     """Free-standing claims (the summary, the letter) against the whole CV."""
     listing = "\n".join(f"[{k}] {v}" for k, v in lines.items())
     prompt = f"<master_cv>\n{cv_text}\n</master_cv>\n\n{advert}\n\n<lines>\n{listing}\n</lines>"
     return _report(model, CHECK_SYSTEM, prompt, lines)
 
 
-def _check_rewrites(model: str, pairs: dict[str, tuple[str, str]]) -> dict[str, str]:
+def _check_rewrites(model: list[str], pairs: dict[str, tuple[str, str]]) -> dict[str, str]:
     """Reworded CV lines against the one line each came from, which is far stricter than the whole CV."""
     listing = "\n\n".join(f"[{k}]\noriginal: {master}\nrewrite: {text}" for k, (text, master) in pairs.items())
     return _report(model, REWRITE_SYSTEM, f"<items>\n{listing}\n</items>", pairs)
 
 
-def _letter(model: str, cv_text: str, advert: str, feedback: str = "") -> CoverLetter | None:
+def _letter(model: list[str], cv_text: str, advert: str, feedback: str = "") -> CoverLetter | None:
     prompt = f"<cv>\n{cv_text}\n</cv>\n\n{advert}"
     if feedback:
         prompt += f"\n\nA previous draft made claims the CV does not support. Avoid these:\n{feedback}"
@@ -231,7 +231,7 @@ def slug(text: str, limit: int = 40) -> str:
 
 
 def tailor(row, cv: dict, cfg: dict, out_root: Path) -> Path | None:
-    model, check_model = cfg["model"], cfg.get("check_model", cfg["model"])
+    model, check_model = cfg["models"], cfg["check_models"]
     cv_text, advert = _master_with_ids(cv), _advert(row)
 
     picks = generate(model, TAILOR_SYSTEM, f"<master_cv>\n{cv_text}\n</master_cv>\n\n{advert}", TailoredCV,

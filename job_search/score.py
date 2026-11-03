@@ -1,5 +1,6 @@
 """Scores each job against the master CV with a small, cheap model."""
 
+import itertools
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
@@ -68,12 +69,17 @@ def score_jobs(rows, cv: dict, cfg: dict, search: dict, on_scored) -> None:
         cv=yaml.safe_dump(cv, sort_keys=False, allow_unicode=True),
     )
 
+    done = itertools.count(1)
+
     def one(row):
-        result = generate(cfg["model"], system, _user_prompt(row), JobScore)
+        result = generate(cfg["models"], system, _user_prompt(row), JobScore)
         if result is None:
             log.warning("could not score %s", row["id"])
-            return
-        on_scored(row, result)
+        else:
+            on_scored(row, result)
+        n = next(done)
+        if n % 10 == 0 or n == len(rows):
+            log.info("scored %d/%d", n, len(rows))
 
     with ThreadPoolExecutor(max_workers=cfg.get("workers", 2)) as pool:
         list(pool.map(one, rows))

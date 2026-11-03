@@ -43,7 +43,9 @@ search:
   languages: [English, Spanish]
 
 scoring:
-  model: gemini-3.5-flash-lite
+  # Tried in order; free-tier quotas are per model, so the next takes over when one runs out.
+  # groq/ entries need GROQ_API_KEY and are skipped without it.
+  models: [gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-2.5-flash-lite, groq/openai/gpt-oss-120b]
   # Parallel requests; keep low on the free tier, whose per-minute limit is small.
   workers: 2
   # Cost guard: jobs scored per run, newest first.
@@ -53,8 +55,8 @@ scoring:
 
 tailoring:
   # Writing quality matters more here than at scoring, and it's only a handful of calls a day.
-  model: gemini-3.6-flash
-  check_model: gemini-3.6-flash
+  models: [gemini-3.6-flash, gemini-3.8-flash, groq/openai/gpt-oss-120b, gemini-3.5-flash-lite]
+  check_models: [gemini-3.6-flash, gemini-3.8-flash, groq/openai/gpt-oss-120b, gemini-3.5-flash-lite]
 
 sources:
   # UK boards. Both need free API keys in .env and are skipped with a warning without them.

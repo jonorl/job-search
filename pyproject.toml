@@ -5,6 +5,7 @@ description = "Finds remote jobs, scores them against a master CV and prepares t
 requires-python = ">=3.12"
 dependencies = [
     "google-genai>=2.34",
+    "groq>=1.7",
     "httpx>=0.28",
     "pydantic>=2.14",
     "pyyaml>=6.0",
