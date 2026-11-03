@@ -4,6 +4,7 @@ import logging
 import os
 import sqlite3
 import threading
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -12,6 +13,7 @@ from . import db
 from .filters import reject_reason
 from .score import JobScore, score_jobs
 from .sources import enrich, fetch_all
+from .tailor import tailor
 
 log = logging.getLogger("job_search")
 ROOT = Path(__file__).resolve().parent.parent
@@ -85,6 +87,28 @@ def cmd_top(conn: sqlite3.Connection, config: dict, n: int | None) -> None:
             print(f"  - {gap}")
 
 
+def cmd_tailor(conn: sqlite3.Connection, config: dict, cv: dict, n: int | None, job_id: str | None) -> None:
+    cfg = config["scoring"]
+    if job_id:
+        # Regenerates one job whatever its status, e.g. after editing the master CV or the prompts.
+        rows = conn.execute("SELECT * FROM jobs WHERE id = ? AND score IS NOT NULL", (job_id,)).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT * FROM jobs WHERE status = 'scored' AND score >= ?
+               ORDER BY score DESC, posted_at DESC LIMIT ?""",
+            (cfg["min_score"], n or cfg["shortlist_size"]),
+        ).fetchall()
+    out_root = ROOT / "output" / date.today().isoformat()
+    for row in rows:
+        log.info("tailoring %s: %s at %s", row["id"], row["title"], row["company"])
+        out = tailor(row, cv, config["tailoring"], out_root)
+        if out is None:
+            log.warning("could not tailor %s; it stays in the queue", row["id"])
+            continue
+        db.set_status(conn, row["id"], "shortlisted")
+        log.info("wrote %s", out.relative_to(ROOT))
+
+
 def cmd_stats(conn: sqlite3.Connection) -> None:
     for r in conn.execute("SELECT status, count(*) n FROM jobs GROUP BY status ORDER BY n DESC"):
         print(f"{r['status']:>14}  {r['n']}")
@@ -107,8 +131,11 @@ def main() -> None:
     p.add_argument("--rescore", action="store_true", help="also re-score jobs already scored")
     p = sub.add_parser("top", help="print the shortlist")
     p.add_argument("-n", type=int)
+    p = sub.add_parser("tailor", help="write a CV and cover letter for each of the top jobs")
+    p.add_argument("-n", type=int)
+    p.add_argument("--job", help="regenerate this job id instead")
     sub.add_parser("stats", help="counts by status")
-    sub.add_parser("run", help="fetch, score and print the shortlist")
+    sub.add_parser("run", help="fetch, score and tailor the shortlist")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -122,8 +149,10 @@ def main() -> None:
         cmd_fetch(conn, config)
     if args.command in ("score", "run"):
         cmd_score(conn, config, load_yaml(args.cv), getattr(args, "limit", None), getattr(args, "rescore", False))
-    if args.command in ("top", "run"):
-        cmd_top(conn, config, getattr(args, "n", None))
+    if args.command == "top":
+        cmd_top(conn, config, args.n)
+    if args.command in ("tailor", "run"):
+        cmd_tailor(conn, config, load_yaml(args.cv), getattr(args, "n", None), getattr(args, "job", None))
     if args.command == "stats":
         cmd_stats(conn)
 

@@ -82,3 +82,8 @@ def set_score(conn: sqlite3.Connection, job_id: str, score: int, detail: dict) -
         (score, json.dumps(detail), datetime.now(UTC).isoformat(), job_id),
     )
     conn.commit()
+
+
+def set_status(conn: sqlite3.Connection, job_id: str, status: str) -> None:
+    conn.execute("UPDATE jobs SET status = ? WHERE id = ?", (status, job_id))
+    conn.commit()

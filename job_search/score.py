@@ -1,15 +1,13 @@
 """Scores each job against the master CV with a small, cheap model."""
 
 import logging
-import random
-import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 import yaml
-from google import genai
-from google.genai import errors, types
 from pydantic import BaseModel, Field
+
+from .llm import generate
 
 log = logging.getLogger(__name__)
 
@@ -62,43 +60,20 @@ Salary: {row["salary"] or "not stated"}
 
 
 def score_jobs(rows, cv: dict, cfg: dict, search: dict, on_scored) -> None:
-    client = genai.Client()
     # Contact details don't affect fit, so they stay out of every prompt.
     cv = {k: v for k, v in cv.items() if k != "contact"}
-    config = types.GenerateContentConfig(
-        system_instruction=SYSTEM.format(
-            languages=", ".join(search["languages"]),
-            based_in=search["based_in"],
-            cv=yaml.safe_dump(cv, sort_keys=False, allow_unicode=True),
-        ),
-        response_mime_type="application/json",
-        response_schema=JobScore,
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
+    system = SYSTEM.format(
+        languages=", ".join(search["languages"]),
+        based_in=search["based_in"],
+        cv=yaml.safe_dump(cv, sort_keys=False, allow_unicode=True),
     )
 
     def one(row):
-        for attempt in range(5):
-            try:
-                response = client.models.generate_content(
-                    model=cfg["model"], contents=_user_prompt(row), config=config
-                )
-                break
-            except errors.ClientError as e:
-                # The free tier's per-minute limit is low, so back off on 429; other 4xx fail every job.
-                if e.code != 429:
-                    raise
-                time.sleep(2**attempt * 5 + random.random())
-            except errors.ServerError as e:
-                log.warning("scoring %s failed: %r", row["id"], e)
-                time.sleep(5)
-        else:
-            log.warning("scoring %s gave up after repeated rate limits", row["id"])
+        result = generate(cfg["model"], system, _user_prompt(row), JobScore)
+        if result is None:
+            log.warning("could not score %s", row["id"])
             return
-        if not isinstance(response.parsed, JobScore):
-            reason = response.candidates[0].finish_reason if response.candidates else "no candidates"
-            log.warning("scoring %s returned nothing usable (%s)", row["id"], reason)
-            return
-        on_scored(row, response.parsed)
+        on_scored(row, result)
 
     with ThreadPoolExecutor(max_workers=cfg.get("workers", 2)) as pool:
         list(pool.map(one, rows))

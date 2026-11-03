@@ -51,6 +51,11 @@ scoring:
   shortlist_size: 5
   min_score: 60
 
+tailoring:
+  # Writing quality matters more here than at scoring, and it's only a handful of calls a day.
+  model: gemini-3.6-flash
+  check_model: gemini-3.6-flash
+
 sources:
   # UK boards. Both need free API keys in .env and are skipped with a warning without them.
   reed:
