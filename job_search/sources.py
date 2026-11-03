@@ -212,6 +212,12 @@ def ashby(client: httpx.Client, slugs: list[str]) -> list[Job]:
     return jobs
 
 
+def uk_location(name: str | None) -> str:
+    # UK-only boards give bare towns like "Leeds", which the region filter wouldn't recognise.
+    name = (name or "").strip()
+    return name if re.search(r"\b(UK|United Kingdom)$", name) else f"{name}, UK".lstrip(", ")
+
+
 def _env(name: str) -> str:
     value = os.environ.get(name, "")
     if not value:
@@ -242,8 +248,7 @@ def reed(client: httpx.Client, cfg) -> list[Job]:
                     url=j["jobUrl"],
                     # Only a snippet; reed_details fetches the full advert for jobs that pass the filters.
                     description=strip_html(j.get("jobDescription")),
-                    # Reed is UK-only, and a bare town like "Leeds" wouldn't match the region filter.
-                    location=f"{j.get('locationName') or ''}, UK".lstrip(", "),
+                    location=uk_location(j.get("locationName")),
                     salary=salary,
                     posted_at=datetime.strptime(j["date"], "%d/%m/%Y").replace(tzinfo=UTC) if j.get("date") else None,
                 ))
@@ -280,7 +285,7 @@ def adzuna(client: httpx.Client, cfg) -> list[Job]:
                     company=(j.get("company") or {}).get("display_name", ""),
                     url=j["redirect_url"],
                     description=strip_html(j.get("description")) + "\n\n[Snippet only; full advert at the link.]",
-                    location=f"{(j.get('location') or {}).get('display_name', '')}, UK".lstrip(", "),
+                    location=uk_location((j.get("location") or {}).get("display_name")),
                     salary=salary,
                     posted_at=from_iso(j.get("created")),
                 ))

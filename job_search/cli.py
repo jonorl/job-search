@@ -109,6 +109,7 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("google_genai").setLevel(logging.WARNING)
     load_dotenv(ROOT / ".env")
     config = load_yaml(args.config)
     conn = db.connect()
