@@ -45,11 +45,14 @@ def cmd_fetch(conn: sqlite3.Connection, config: dict) -> None:
     log.info("fetched %d, new %d, passed filters %d", len(jobs), len(fresh), len(passed))
 
 
-def cmd_score(conn: sqlite3.Connection, config: dict, cv: dict, limit: int | None) -> None:
+def cmd_score(conn: sqlite3.Connection, config: dict, cv: dict, limit: int | None, rescore: bool) -> None:
     cfg = config["scoring"]
+    # Rescoring is for after the CV or the scoring rules change; shortlisted and applied jobs are left alone.
+    statuses = ("passed", "scored") if rescore else ("passed",)
     rows = conn.execute(
-        "SELECT * FROM jobs WHERE status = 'passed' ORDER BY posted_at DESC NULLS LAST LIMIT ?",
-        (limit or cfg["max_per_run"],),
+        f"""SELECT * FROM jobs WHERE status IN ({",".join("?" * len(statuses))})
+            ORDER BY posted_at DESC NULLS LAST LIMIT ?""",
+        (*statuses, limit or cfg["max_per_run"]),
     ).fetchall()
     log.info("scoring %d jobs with %s", len(rows), cfg["model"])
     lock = threading.Lock()
@@ -61,7 +64,7 @@ def cmd_score(conn: sqlite3.Connection, config: dict, cv: dict, limit: int | Non
         with lock:
             db.set_score(conn, row["id"], score, result.model_dump())
 
-    score_jobs(rows, cv, cfg, config["search"]["languages"], on_scored)
+    score_jobs(rows, cv, cfg, config["search"], on_scored)
 
 
 def cmd_top(conn: sqlite3.Connection, config: dict, n: int | None) -> None:
@@ -101,6 +104,7 @@ def main() -> None:
     sub.add_parser("fetch", help="fetch new jobs and apply the rule filters")
     p = sub.add_parser("score", help="score jobs that passed the filters")
     p.add_argument("--limit", type=int)
+    p.add_argument("--rescore", action="store_true", help="also re-score jobs already scored")
     p = sub.add_parser("top", help="print the shortlist")
     p.add_argument("-n", type=int)
     sub.add_parser("stats", help="counts by status")
@@ -117,7 +121,7 @@ def main() -> None:
     if args.command in ("fetch", "run"):
         cmd_fetch(conn, config)
     if args.command in ("score", "run"):
-        cmd_score(conn, config, load_yaml(args.cv), getattr(args, "limit", None))
+        cmd_score(conn, config, load_yaml(args.cv), getattr(args, "limit", None), getattr(args, "rescore", False))
     if args.command in ("top", "run"):
         cmd_top(conn, config, getattr(args, "n", None))
     if args.command == "stats":

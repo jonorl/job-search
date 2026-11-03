@@ -19,6 +19,7 @@ REGION_TERMS = {
            "malta", "netherlands", "poland", "portugal", "romania", "slovakia", "slovenia", "spain",
            "sweden", "berlin", "munich", "hamburg", "amsterdam", "paris", "madrid", "barcelona",
            "lisbon", "dublin", "warsaw", "prague", "vienna", "stockholm", "copenhagen"],
+    "emea": ["emea", "africa", "east africa", "uganda", "kenya", "eat", "utc+3", "gmt+3"],
 }
 
 # Lever reports countries as ISO codes, which are only safe to match case-sensitively as whole words.
@@ -26,6 +27,7 @@ REGION_CODES = {
     "uk": ["GB", "UK"],
     "eu": ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT",
            "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "EU"],
+    "emea": ["UG", "KE"],
 }
 
 

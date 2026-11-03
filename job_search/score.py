@@ -20,7 +20,7 @@ class JobScore(BaseModel):
         description="False if the advert requires office days, hybrid working or relocation"
     )
     location_eligible: bool = Field(
-        description="False if the job clearly cannot hire a remote worker based in the UK or the EU"
+        description="False if the job requires living somewhere the candidate does not, or working hours far from theirs"
     )
     language_ok: bool = Field(description="False if the job requires a language the candidate does not speak")
     seniority_fit: Literal["under", "match", "over"] = Field(
@@ -34,8 +34,10 @@ SYSTEM = """You screen job adverts for one candidate. Judge fit using only the C
 skills or experience it does not state.
 
 Rules:
-- The candidate wants fully remote work they can do from the UK or the EU. A job restricted to other \
-countries or time zones far from Europe is not eligible.
+- The candidate wants fully remote work. They are based in {based_in}, and can work UK and EU hours.
+- Eligible: jobs open worldwide or across EMEA/Africa, and UK or EU jobs that hire contractors or \
+employees abroad (e.g. through an employer of record). Not eligible: jobs that require living in a \
+particular country the candidate is not in, or hours far from theirs (e.g. US time zones only).
 - The candidate speaks: {languages}.
 - Their software-engineering experience is recent (they moved from 10+ years in BI and data); weigh \
 years of professional software experience accordingly when the advert asks for them.
@@ -59,13 +61,15 @@ Salary: {row["salary"] or "not stated"}
 </job>"""
 
 
-def score_jobs(rows, cv: dict, cfg: dict, languages: list[str], on_scored) -> None:
+def score_jobs(rows, cv: dict, cfg: dict, search: dict, on_scored) -> None:
     client = genai.Client()
     # Contact details don't affect fit, so they stay out of every prompt.
     cv = {k: v for k, v in cv.items() if k != "contact"}
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM.format(
-            languages=", ".join(languages), cv=yaml.safe_dump(cv, sort_keys=False, allow_unicode=True)
+            languages=", ".join(search["languages"]),
+            based_in=search["based_in"],
+            cv=yaml.safe_dump(cv, sort_keys=False, allow_unicode=True),
         ),
         response_mime_type="application/json",
         response_schema=JobScore,

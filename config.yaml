@@ -21,6 +21,10 @@ search:
     - account executive
     - recruiter
     - intern
+    - werkstudent
+    - student
+    - graduate
+    - trainee
     - "sap "
     - salesforce
     - mainframe
@@ -29,9 +33,11 @@ search:
     - director
     - head of
     - vp
-  # Remote only, hireable from the UK or the EU.
   remote_only: true
-  allowed_regions: [uk, eu]
+  # Region filter is loose on purpose: UK/EU jobs pass so the scorer can check whether they hire abroad.
+  allowed_regions: [uk, eu, emea]
+  # Where the candidate actually works from; the scorer judges eligibility against this.
+  based_in: Kampala, Uganda (UTC+3), until July 2027
   max_age_days: 14
   # Languages a job may require; anything else is penalised in scoring.
   languages: [English, Spanish]
