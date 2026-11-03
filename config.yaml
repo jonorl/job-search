@@ -1,0 +1,70 @@
+# Search parameters. Edit freely; nothing here is code.
+
+search:
+  # A title must contain one of these (case-insensitive) to be considered.
+  title_include:
+    - engineer
+    - developer
+    - software
+    - full stack
+    - fullstack
+    - full-stack
+    - backend
+    - back-end
+    - frontend
+    - front-end
+    - platform
+    - devops
+    - architect
+  title_exclude:
+    - sales
+    - account executive
+    - recruiter
+    - intern
+    - "sap "
+    - salesforce
+    - mainframe
+    - principal
+    - staff
+    - director
+    - head of
+    - vp
+  # Remote only, hireable from the UK or the EU.
+  remote_only: true
+  allowed_regions: [uk, eu]
+  max_age_days: 14
+  # Languages a job may require; anything else is penalised in scoring.
+  languages: [English, Spanish]
+
+scoring:
+  model: gemini-3.5-flash-lite
+  # Parallel requests; keep low on the free tier, whose per-minute limit is small.
+  workers: 2
+  # Cost guard: jobs scored per run, newest first.
+  max_per_run: 150
+  shortlist_size: 5
+  min_score: 60
+
+sources:
+  # UK boards. Both need free API keys in .env and are skipped with a warning without them.
+  reed:
+    queries: [software engineer, developer]
+    pages: 2
+  adzuna:
+    queries: [software engineer, developer]
+    pages: 2
+    max_days_old: 14
+  remotive: true
+  remoteok: true
+  himalayas:
+    queries: [software engineer, developer]
+    # ISO codes; each also returns worldwide jobs.
+    countries: [GB]
+    pages: 3
+  arbeitnow:
+    pages: 5
+  # Company job boards. The slug is the bit after the board's domain,
+  # e.g. job-boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>.
+  greenhouse: [gitlab]
+  lever: []
+  ashby: [linear]
