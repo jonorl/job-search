@@ -97,11 +97,17 @@ def cmd_tailor(conn: sqlite3.Connection, config: dict, cv: dict, n: int | None, 
         # Regenerates one job whatever its status, e.g. after editing the master CV or the prompts.
         rows = conn.execute("SELECT * FROM jobs WHERE id = ? AND score IS NOT NULL", (job_id,)).fetchall()
     else:
-        rows = conn.execute(
-            """SELECT * FROM jobs WHERE status = 'scored' AND score >= ?
-               ORDER BY score DESC, posted_at DESC LIMIT ?""",
-            (cfg["min_score"], n or cfg["shortlist_size"]),
-        ).fetchall()
+        # One job per company, so a firm with several similar adverts can't take the whole shortlist.
+        rows, companies = [], set()
+        for row in conn.execute(
+            "SELECT * FROM jobs WHERE status = 'scored' AND score >= ? ORDER BY score DESC, posted_at DESC",
+            (cfg["min_score"],),
+        ):
+            if row["company"].lower() not in companies:
+                companies.add(row["company"].lower())
+                rows.append(row)
+            if len(rows) == (n or cfg["shortlist_size"]):
+                break
     out_root = ROOT / "output" / date.today().isoformat()
     for row in rows:
         log.info("tailoring %s: %s at %s", row["id"], row["title"], row["company"])

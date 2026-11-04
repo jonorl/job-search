@@ -32,6 +32,7 @@ search:
     - staff
     - director
     - head of
+    - talent pool
     - vp
   remote_only: true
   # Region filter is loose on purpose: UK/EU jobs pass so the scorer can check whether they hire abroad.
@@ -45,7 +46,7 @@ search:
 scoring:
   # Tried in order; free-tier quotas are per model, so the next takes over when one runs out.
   # groq/ entries need GROQ_API_KEY and are skipped without it.
-  models: [gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-2.5-flash-lite, groq/openai/gpt-oss-120b]
+  models: [gemini-3.5-flash-lite, gemini-3.1-flash-lite, groq/openai/gpt-oss-120b]
   # Parallel requests; keep low on the free tier, whose per-minute limit is small.
   workers: 2
   # Cost guard: jobs scored per run, newest first.

@@ -241,7 +241,12 @@ def tailor(row, cv: dict, cfg: dict, out_root: Path) -> Path | None:
     data, lines = _assemble(cv, picks)
     log.info("%s: CV drafted, checking %d lines", row["id"], len(lines))
 
-    rewrites = {k: v for k, v in lines.items() if k != "summary"}
+    stacks = {f"p:{p['name']}": ", ".join(p["stack"]) for p in cv["projects"]}
+    # The stack is printed beside each project, so a description that names it adds nothing.
+    rewrites = {
+        k: (text, f"{master} [stack: {stacks[k]}]" if k in stacks else master)
+        for k, (text, master) in lines.items() if k != "summary"
+    }
     reverted = _check_rewrites(check_model, rewrites)
     reverted |= _check(check_model, cv_text, advert, {"summary": lines["summary"][0]})
     for line_id, issue in reverted.items():

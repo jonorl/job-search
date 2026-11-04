@@ -7,6 +7,7 @@ for the day (or is overloaded) the next takes over; "groq/<model>" entries go to
 import json
 import logging
 import random
+import re
 import threading
 import time
 from typing import TypeVar
@@ -27,6 +28,11 @@ class QuotaExhausted(Exception):
 
 class _Skip(Exception):
     """This model can't serve the request right now; try the next one."""
+
+    def __init__(self, reason: str, strike: bool = False):
+        super().__init__(reason)
+        # Only outages count towards dropping a model for the run; rate limits pass within a minute.
+        self.strike = strike
 
 
 _lock = threading.Lock()
@@ -52,7 +58,8 @@ def _groq_client() -> groq.Groq:
     global _groq
     with _lock:
         if _groq is None:
-            _groq = groq.Groq()
+            # Retries are handled here, with the fallback chain; the SDK's own would double them up.
+            _groq = groq.Groq(max_retries=0)
         return _groq
 
 
@@ -77,6 +84,14 @@ def _strict_schema(schema: type[BaseModel]) -> dict:
     return fix(raw)
 
 
+def _wait(model: str, seconds: float | None, attempt: int) -> None:
+    # Per-minute limits reset within a minute, so honour the server's hint rather than guessing.
+    wait = min(seconds, 60) if seconds else 2**attempt * 5
+    wait += random.random()
+    log.info("%s rate-limited, waiting %.0fs", model, wait)
+    time.sleep(wait)
+
+
 def _call_gemini(model: str, system: str, prompt: str, schema: type[T], thinking: str) -> T | None:
     config = types.GenerateContentConfig(
         system_instruction=system,
@@ -84,7 +99,8 @@ def _call_gemini(model: str, system: str, prompt: str, schema: type[T], thinking
         response_schema=schema,
         thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel(thinking)),
     )
-    for attempt in range(3):
+    unavailable = 0
+    for attempt in range(4):
         try:
             response = _gemini_client().models.generate_content(model=model, contents=prompt, config=config)
         except errors.ClientError as e:
@@ -94,12 +110,13 @@ def _call_gemini(model: str, system: str, prompt: str, schema: type[T], thinking
             if e.code != 429:
                 _dead.add(model)
                 raise _Skip(f"rejected: {e}")
-            wait = 2**attempt * 5 + random.random()
-            log.info("%s rate-limited, waiting %.0fs", model, wait)
-            time.sleep(wait)
+            delay = re.search(r"'retryDelay': '(\d+)s'", str(e))
+            _wait(model, int(delay.group(1)) if delay else None, attempt)
             continue
         except errors.ServerError as e:
-            log.info("%s unavailable (%s), retrying", model, e.code)
+            unavailable += 1
+            if unavailable >= 2:
+                raise _Skip(f"unavailable ({e.code})", strike=True)
             time.sleep(5)
             continue
         if isinstance(response.parsed, schema):
@@ -107,16 +124,18 @@ def _call_gemini(model: str, system: str, prompt: str, schema: type[T], thinking
         reason = response.candidates[0].finish_reason if response.candidates else "no candidates"
         log.warning("%s returned nothing usable (%s)", model, reason)
         return None
-    raise _Skip("still rate-limited or unavailable")
+    raise _Skip("still rate-limited")
 
 
 def _call_groq(model: str, system: str, prompt: str, schema: type[T], thinking: str) -> T | None:
+    name = f"groq/{model}"
     try:
         client = _groq_client()
     except groq.GroqError as e:
-        _dead.add(f"groq/{model}")
+        _dead.add(name)
         raise _Skip(str(e))
-    for attempt in range(3):
+    unavailable = 0
+    for attempt in range(4):
         try:
             response = client.chat.completions.create(
                 model=model,
@@ -126,31 +145,41 @@ def _call_groq(model: str, system: str, prompt: str, schema: type[T], thinking: 
                     "json_schema": {"name": schema.__name__, "strict": True, "schema": _strict_schema(schema)},
                 },
                 reasoning_effort=thinking.lower(),
+                # The default leaves too little room after reasoning, which truncates a full CV.
+                max_completion_tokens=16000,
             )
         except groq.RateLimitError as e:
             # Groq reports daily limits as "per day" (RPD/TPD); anything shorter is worth waiting out.
             if "per day" in str(e).lower():
-                _dead.add(f"groq/{model}")
+                _dead.add(name)
                 raise _Skip("daily quota used up")
-            wait = 2**attempt * 5 + random.random()
-            log.info("groq/%s rate-limited, waiting %.0fs", model, wait)
-            time.sleep(wait)
+            retry_after = e.response.headers.get("retry-after")
+            _wait(name, float(retry_after) if retry_after else None, attempt)
             continue
         except groq.APIConnectionError:
+            unavailable += 1
+            if unavailable >= 2:
+                raise _Skip("unreachable", strike=True)
             time.sleep(5)
             continue
         except groq.APIStatusError as e:
             if e.status_code >= 500:
+                unavailable += 1
+                if unavailable >= 2:
+                    raise _Skip(f"unavailable ({e.status_code})", strike=True)
                 time.sleep(5)
                 continue
-            _dead.add(f"groq/{model}")
+            if "json_validate_failed" in str(e):
+                # A one-off bad generation, not a broken model; let the next model take this request.
+                raise _Skip("output didn't match the schema")
+            _dead.add(name)
             raise _Skip(f"rejected: {e}")
         choice = response.choices[0]
         if choice.finish_reason != "stop" or not choice.message.content:
-            log.warning("groq/%s returned nothing usable (%s)", model, choice.finish_reason)
+            log.warning("%s returned nothing usable (%s)", name, choice.finish_reason)
             return None
         return schema.model_validate(json.loads(choice.message.content))
-    raise _Skip("still rate-limited or unavailable")
+    raise _Skip("still rate-limited")
 
 
 def generate(models: list[str], system: str, prompt: str, schema: type[T], thinking: str = "LOW") -> T | None:
@@ -170,10 +199,11 @@ def generate(models: list[str], system: str, prompt: str, schema: type[T], think
             else:
                 result = _call_gemini(model, system, prompt, schema, thinking)
         except _Skip as e:
-            # An overloaded model tends to stay overloaded, and each try costs ~25s of retries.
-            _strikes[model] = _strikes.get(model, 0) + 1
-            if _strikes[model] >= 2:
-                _dead.add(model)
+            # An overloaded model tends to stay overloaded, and each try costs ~10s of retries.
+            if e.strike:
+                _strikes[model] = _strikes.get(model, 0) + 1
+                if _strikes[model] >= 2:
+                    _dead.add(model)
             log.warning("%s skipped%s: %s", model, " for the rest of this run" if model in _dead else "", e)
             continue
         if result is not None:
