@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job applications</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #fff; --text: #1d1d1b; --muted: #6b6b66; --line: #e2e2dd;
+    --accent: #2f5fd0; --good: #23824a; --warn: #a8650b; --bad: #b3372e; --chip: #eeeeea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --card: #1f1f1d; --text: #ebebe6; --muted: #9c9c95; --line: #33332f;
+      --accent: #7c9ef0; --good: #5cbf83; --warn: #e0a24a; --bad: #e57a70; --chip: #2a2a27;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  nav button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px;
+    padding: 5px 14px; cursor: pointer; font: inherit; }
+  nav button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .banner { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; background: var(--chip); }
+  .banner.error { color: var(--bad); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 14px; }
+  .head { display: flex; gap: 14px; align-items: flex-start; }
+  .score { font-weight: 700; font-size: 20px; min-width: 44px; text-align: center; padding: 4px 0;
+    border-radius: 8px; background: var(--chip); }
+  .title { font-weight: 600; font-size: 17px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .links { display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0; }
+  a { color: var(--accent); }
+  ul { margin: 6px 0; padding-left: 20px; }
+  .plus li::marker { content: "+  "; color: var(--good); }
+  .minus li::marker { content: "–  "; color: var(--bad); }
+  .warn { color: var(--warn); }
+  details { margin: 8px 0; }
+  summary { cursor: pointer; color: var(--muted); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .actions button, .qa button { font: inherit; padding: 6px 14px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  .actions .applied { border-color: var(--good); color: var(--good); }
+  .actions .reject { border-color: var(--bad); color: var(--bad); }
+  .actions .interested { border-color: var(--accent); color: var(--accent); }
+  .qa { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+  .qa textarea, .qa input { width: 100%; font: inherit; padding: 8px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); margin: 4px 0 8px; }
+  .qa textarea { min-height: 110px; }
+  .answer { padding: 10px 0; border-bottom: 1px dashed var(--line); }
+  .answer:last-child { border-bottom: 0; }
+  .q { font-weight: 600; }
+  .a { white-space: pre-wrap; margin: 4px 0; }
+  .copy { font-size: 12px; padding: 2px 8px !important; }
+  .empty { color: var(--muted); padding: 24px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Job applications</h1>
+  <nav id="tabs"></nav>
+  <div id="banner"></div>
+  <div id="list"></div>
+</main>
+<script>
+const TABS = [
+  ["shortlisted", "To review"], ["interested", "Interested"], ["applied", "Applied"], ["rejected", "Rejected"],
+];
+let tab = "shortlisted", data = { jobs: [] }, timer;
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+async function load() {
+  data = await (await fetch("api/jobs")).json();
+  render();
+  // Poll only while something is running in the background.
+  const busy = data.leads?.state === "working" || data.jobs.some(j => j.task?.state === "working");
+  clearTimeout(timer);
+  if (busy) timer = setTimeout(load, 3000);
+}
+
+async function act(body) {
+  const r = await fetch("api/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) alert((await r.json()).detail || r.statusText);
+  load();
+}
+
+function render() {
+  document.getElementById("tabs").innerHTML = TABS.map(([key, label]) => {
+    const n = data.jobs.filter(j => j.status === key).length;
+    return `<button aria-pressed="${key === tab}" onclick="tab='${key}';render()">${label} (${n})</button>`;
+  }).join("");
+
+  const l = data.leads;
+  document.getElementById("banner").innerHTML = l
+    ? `<div class="banner ${l.state === "error" ? "error" : ""}">${esc(l.message)}</div>` : "";
+
+  const jobs = data.jobs.filter(j => j.status === tab);
+  document.getElementById("list").innerHTML = jobs.length
+    ? jobs.map(card).join("")
+    : `<p class="empty">Nothing here.${tab === "shortlisted" ? ` <a href="#" onclick="act({action:'lead'});return false">Tailor another lead</a>` : ""}</p>`;
+}
+
+function card(j) {
+  const d = j.score_detail || {};
+  const id = esc(JSON.stringify(j.id));
+  const warnings = Object.values(j.letter_warnings || {});
+  const reverted = Object.entries(j.cv_lines_reverted || {});
+  const file = n => `files/${j.folder}/${encodeURIComponent(n)}`;
+  const pdfs = j.files.map(n => `<a href="${file(n)}" target="_blank">${esc(n.replace(/^.*?-(CV|Cover-Letter)\.pdf$/, "$1").replace("-", " "))}</a>`).join("");
+  const actions = j.status === "shortlisted" ? `
+      <button class="reject" onclick='act({id:${id},action:"reject"})'>Reject</button>
+      <button class="interested" onclick='act({id:${id},action:"interested"})'>Interested</button>
+      <button class="applied" onclick='act({id:${id},action:"applied"})'>Applied</button>`
+    : j.status === "interested" ? `
+      <button class="applied" onclick='act({id:${id},action:"applied"})'>Applied</button>
+      <button class="reject" onclick='act({id:${id},action:"reject"})'>Reject</button>
+      <button onclick='act({id:${id},action:"undo"})'>Back to review</button>`
+    : `<button onclick='act({id:${id},action:"undo"})'>Back to review</button>`;
+
+  return `<article class="card">
+    <div class="head">
+      <div class="score">${j.score}</div>
+      <div>
+        <div class="title">${esc(j.title)}</div>
+        <div class="meta">${esc(j.company)} · ${esc(j.location || "location n/a")}${j.salary ? " · " + esc(j.salary) : ""} · via ${esc(j.source)}</div>
+      </div>
+    </div>
+    <div class="links">
+      <a href="${esc(j.apply_url || j.url)}" target="_blank" rel="noopener">Apply ↗</a>
+      ${pdfs}
+    </div>
+    ${warnings.length ? `<div class="warn"><strong>Read the letter first:</strong><ul>${warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
+    <details><summary>Why it fits${d.gaps?.length ? " and gaps" : ""}</summary>
+      <ul class="plus">${(d.reasons || []).map(r => `<li>${esc(r)}</li>`).join("")}</ul>
+      <ul class="minus">${(d.gaps || []).map(g => `<li>${esc(g)}</li>`).join("")}</ul>
+    </details>
+    ${reverted.length ? `<details><summary>${reverted.length} CV line${reverted.length > 1 ? "s" : ""} put back to the original</summary>
+      <ul>${reverted.map(([k, v]) => `<li>${esc(v)}</li>`).join("")}</ul></details>` : ""}
+    ${j.status === "interested" ? questions(j, id) : ""}
+    <div class="actions">${actions}</div>
+  </article>`;
+}
+
+function questions(j, id) {
+  const t = j.task, a = j.application;
+  const box = `<details ${a ? "" : "open"}><summary>${a ? "Answer again" : "Questions"}</summary>
+      <label class="meta">Application page URL (Greenhouse jobs are read automatically)</label>
+      <input id="url-${esc(j.folder)}" placeholder="${esc(j.apply_url || "")}">
+      <label class="meta">…or paste the form's questions</label>
+      <textarea id="q-${esc(j.folder)}"></textarea>
+      <button onclick='ask(${id}, ${esc(JSON.stringify(j.folder))})'>Answer</button>
+    </details>`;
+  const status = t ? `<p class="${t.state === "error" ? "warn" : "meta"}">${esc(t.message)}</p>` : "";
+  const answers = a ? a.answers.map((x, i) => `<div class="answer">
+      <div class="q">${esc(x.question)}</div>
+      ${x.needs_input ? `<div class="warn">Needs you: ${esc(x.note)}</div>`
+        : `<div class="a" id="a-${esc(j.folder)}-${i}">${esc(x.answer)}</div>
+           <button class="copy" onclick="copy(this)">Copy</button>`}
+      ${x.warning ? `<div class="warn">Check: ${esc(x.warning)}</div>` : ""}
+    </div>`).join("") : "";
+  return `<div class="qa">${status}${answers}${t?.state === "working" ? "" : box}</div>`;
+}
+
+function ask(id, folder) {
+  act({ id, action: "interested", url: document.getElementById("url-" + folder).value,
+        questions: document.getElementById("q-" + folder).value });
+}
+
+function copy(button) {
+  navigator.clipboard.writeText(button.previousElementSibling.textContent);
+  button.textContent = "Copied";
+  setTimeout(() => (button.textContent = "Copy"), 1500);
+}
+
+load();
+</script>
+</body>
+</html>

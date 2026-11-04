@@ -1,11 +1,13 @@
 """Structured output from a chain of models, shared by scoring and tailoring.
 
 Each step lists models in order of preference. Free-tier quotas are per model, so when one runs out
-for the day (or is overloaded) the next takes over; "groq/<model>" entries go to Groq instead of Gemini.
+for the day (or is overloaded) the next takes over. A bare name goes to Gemini, "groq/<model>" to Groq,
+and "otari/<model or policy>" to an Otari gateway, which can run its own fallbacks server-side.
 """
 
 import json
 import logging
+import os
 import random
 import re
 import threading
@@ -13,6 +15,7 @@ import time
 from typing import TypeVar
 
 import groq
+import openai
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel
@@ -37,11 +40,18 @@ class _Skip(Exception):
 
 _lock = threading.Lock()
 _gemini: genai.Client | None = None
-_groq: groq.Groq | None = None
+_chat_clients: dict[str, groq.Groq | openai.OpenAI] = {}
 # Models that ran out of daily quota, rejected the request or kept failing, so later calls in this run
 # skip straight past them.
 _dead: set[str] = set()
 _strikes: dict[str, int] = {}
+
+
+def reset() -> None:
+    """Gives every model another chance; the web server lives across days, and quotas reset daily."""
+    with _lock:
+        _dead.clear()
+        _strikes.clear()
 
 
 def _gemini_client() -> genai.Client:
@@ -54,13 +64,22 @@ def _gemini_client() -> genai.Client:
         return _gemini
 
 
-def _groq_client() -> groq.Groq:
-    global _groq
+def _chat_client(backend: str) -> groq.Groq | openai.OpenAI:
     with _lock:
-        if _groq is None:
+        if backend not in _chat_clients:
             # Retries are handled here, with the fallback chain; the SDK's own would double them up.
-            _groq = groq.Groq(max_retries=0)
-        return _groq
+            if backend == "groq":
+                _chat_clients[backend] = groq.Groq(max_retries=0)
+            else:
+                api_key = os.environ.get("OTARI_API_KEY")
+                if not api_key:
+                    raise _Skip("OTARI_API_KEY is not set")
+                _chat_clients[backend] = openai.OpenAI(
+                    base_url=os.environ.get("OTARI_BASE_URL") or "https://api.otari.ai/api/v1",
+                    api_key=api_key,
+                    max_retries=0,
+                )
+        return _chat_clients[backend]
 
 
 def _strict_schema(schema: type[BaseModel]) -> dict:
@@ -127,11 +146,13 @@ def _call_gemini(model: str, system: str, prompt: str, schema: type[T], thinking
     raise _Skip("still rate-limited")
 
 
-def _call_groq(model: str, system: str, prompt: str, schema: type[T], thinking: str) -> T | None:
-    name = f"groq/{model}"
+def _call_chat(backend: str, model: str, system: str, prompt: str, schema: type[T], thinking: str) -> T | None:
+    """An OpenAI-style chat completion, for Groq and for Otari, whose SDKs share error types."""
+    sdk = groq if backend == "groq" else openai
+    name = f"{backend}/{model}"
     try:
-        client = _groq_client()
-    except groq.GroqError as e:
+        client = _chat_client(backend)
+    except (groq.GroqError, _Skip) as e:
         _dead.add(name)
         raise _Skip(str(e))
     unavailable = 0
@@ -148,7 +169,7 @@ def _call_groq(model: str, system: str, prompt: str, schema: type[T], thinking: 
                 # The default leaves too little room after reasoning, which truncates a full CV.
                 max_completion_tokens=16000,
             )
-        except groq.RateLimitError as e:
+        except sdk.RateLimitError as e:
             # Groq reports daily limits as "per day" (RPD/TPD); anything shorter is worth waiting out.
             if "per day" in str(e).lower():
                 _dead.add(name)
@@ -156,13 +177,13 @@ def _call_groq(model: str, system: str, prompt: str, schema: type[T], thinking: 
             retry_after = e.response.headers.get("retry-after")
             _wait(name, float(retry_after) if retry_after else None, attempt)
             continue
-        except groq.APIConnectionError:
+        except sdk.APIConnectionError:
             unavailable += 1
             if unavailable >= 2:
                 raise _Skip("unreachable", strike=True)
             time.sleep(5)
             continue
-        except groq.APIStatusError as e:
+        except sdk.APIStatusError as e:
             if e.status_code >= 500:
                 unavailable += 1
                 if unavailable >= 2:
@@ -172,6 +193,8 @@ def _call_groq(model: str, system: str, prompt: str, schema: type[T], thinking: 
             if "json_validate_failed" in str(e):
                 # A one-off bad generation, not a broken model; let the next model take this request.
                 raise _Skip("output didn't match the schema")
+            # Otari answers 402 for a spent budget and 424 for a provider it has no credential for;
+            # neither changes within a run, nor does any other refusal.
             _dead.add(name)
             raise _Skip(f"rejected: {e}")
         choice = response.choices[0]
@@ -194,8 +217,9 @@ def generate(models: list[str], system: str, prompt: str, schema: type[T], think
             continue
         tried = True
         try:
-            if model.startswith("groq/"):
-                result = _call_groq(model.removeprefix("groq/"), system, prompt, schema, thinking)
+            backend, _, rest = model.partition("/")
+            if backend in ("groq", "otari") and rest:
+                result = _call_chat(backend, rest, system, prompt, schema, thinking)
             else:
                 result = _call_gemini(model, system, prompt, schema, thinking)
         except _Skip as e:

@@ -1,0 +1,27 @@
+# Routing policies for the Otari gateway (https://github.com/mozilla-ai/otari). The app sends
+# model "otari/job-score" and so on, and Otari tries each candidate in turn, so the fallback chain
+# lives here rather than in the code. Open-weight models go first; Gemini is the safety net.
+# Self-hosted: paste under the gateway's config.yml. Hosted otari.ai: create the same policies on
+# the Routing page. At most five candidates per policy.
+routing:
+  policies:
+    job-score:
+      select:
+        - default: groq:openai/gpt-oss-20b
+      on_failure:
+        - gemini:gemini-3.5-flash-lite
+        - gemini:gemini-3.1-flash-lite
+        - groq:openai/gpt-oss-120b
+    job-tailor:
+      select:
+        - default: groq:openai/gpt-oss-120b
+      on_failure:
+        - gemini:gemini-3.6-flash
+        - gemini:gemini-3.8-flash
+        - gemini:gemini-3.5-flash-lite
+    job-check:
+      select:
+        - default: groq:openai/gpt-oss-120b
+      on_failure:
+        - gemini:gemini-3.6-flash
+        - gemini:gemini-3.5-flash-lite

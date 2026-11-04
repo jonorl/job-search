@@ -1,0 +1,16 @@
+# Copy to cv/answers.yaml (gitignored). Stock answers for application forms: the only source, with
+# the master CV, for facts like these. Anything a form asks that isn't here or in the CV is flagged
+# for you to fill in, never guessed. Leave out what you'd rather answer case by case.
+
+right_to_work:
+  uk: yes
+  eu: yes
+current_location: Kampala, Uganda (UTC+3), until July 2027
+notice_period: Available immediately
+salary_expectation: negotiable
+  gbp: negotiable
+  eur: negotiable
+willing_to_relocate: No, remote only
+how_did_you_hear: Job board
+linkedin: https://www.linkedin.com/in/jonathan-orlowski-58910b21/
+pronouns: he/him

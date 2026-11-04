@@ -4,12 +4,17 @@ version = "0.1.0"
 description = "Finds remote jobs, scores them against a master CV and prepares tailored applications"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.120",
+    "google-auth>=2.40",
     "google-genai>=2.34",
     "groq>=1.7",
     "httpx>=0.28",
+    "openai>=2.0",
     "pydantic>=2.14",
     "pyyaml>=6.0",
+    "requests>=2.32",
     "typst>=0.15",
+    "uvicorn>=0.38",
 ]
 
 [project.scripts]
@@ -21,3 +26,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["job_search*"]
+
+[tool.setuptools.package-data]
+job_search = ["static/*"]

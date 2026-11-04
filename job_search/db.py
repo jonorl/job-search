@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     description TEXT,
     posted_at TEXT,
     fetched_at TEXT NOT NULL,
-    -- new -> filtered_out | passed -> scored -> shortlisted -> applied | dismissed
+    -- new -> filtered_out | passed -> scored -> shortlisted -> interested | applied | rejected
     status TEXT NOT NULL DEFAULT 'new',
     filter_reason TEXT,
     score INTEGER,

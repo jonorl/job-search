@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 from . import db
+from .applications import company_key, recent_companies
 from .filters import reject_reason
 from .llm import QuotaExhausted
 from .score import JobScore, score_jobs
@@ -57,6 +58,12 @@ def cmd_score(conn: sqlite3.Connection, config: dict, cv: dict, limit: int | Non
             ORDER BY posted_at DESC NULLS LAST LIMIT ?""",
         (*statuses, limit or cfg["max_per_run"]),
     ).fetchall()
+    # Scoring a company already applied to would only spend quota on a job that can't be shortlisted.
+    recent = recent_companies(config.get("applications"))
+    for row in [r for r in rows if company_key(r["company"]) in recent]:
+        db.set_filtered(conn, row["id"], "applied in the last 12 months")
+        rows.remove(row)
+    conn.commit()
     log.info("scoring %d jobs with %s", len(rows), cfg["models"][0])
     lock = threading.Lock()
 
@@ -91,36 +98,56 @@ def cmd_top(conn: sqlite3.Connection, config: dict, n: int | None) -> None:
             print(f"  - {gap}")
 
 
-def cmd_tailor(conn: sqlite3.Connection, config: dict, cv: dict, n: int | None, job_id: str | None) -> None:
-    cfg = config["scoring"]
-    if job_id:
-        # Regenerates one job whatever its status, e.g. after editing the master CV or the prompts.
-        rows = conn.execute("SELECT * FROM jobs WHERE id = ? AND score IS NOT NULL", (job_id,)).fetchall()
-    else:
-        # One job per company, so a firm with several similar adverts can't take the whole shortlist.
-        rows, companies = [], set()
-        for row in conn.execute(
-            "SELECT * FROM jobs WHERE status = 'scored' AND score >= ? ORDER BY score DESC, posted_at DESC",
-            (cfg["min_score"],),
-        ):
-            if row["company"].lower() not in companies:
-                companies.add(row["company"].lower())
-                rows.append(row)
-            if len(rows) == (n or cfg["shortlist_size"]):
-                break
+def next_leads(conn: sqlite3.Connection, config: dict, n: int) -> list[sqlite3.Row]:
+    """The best scored jobs, one per company, skipping companies already in play or recently applied to."""
+    taken = recent_companies(config.get("applications"))
+    taken |= {company_key(r["company"]) for r in conn.execute(
+        "SELECT company FROM jobs WHERE status IN ('shortlisted', 'interested', 'applied')")}
+    # One job per company, so a firm with several similar adverts can't take the whole shortlist.
+    rows = []
+    for row in conn.execute(
+        "SELECT * FROM jobs WHERE status = 'scored' AND score >= ? ORDER BY score DESC, posted_at DESC",
+        (config["scoring"]["min_score"],),
+    ):
+        if company_key(row["company"]) not in taken:
+            taken.add(company_key(row["company"]))
+            rows.append(row)
+        if len(rows) == n:
+            break
+    return rows
+
+
+def tailor_rows(conn: sqlite3.Connection, config: dict, cv: dict, rows, wanted: int) -> int:
+    """Tailors rows in order until `wanted` succeed; returns how many did."""
     out_root = ROOT / "output" / date.today().isoformat()
+    done = 0
     for row in rows:
+        if done == wanted:
+            break
         log.info("tailoring %s: %s at %s", row["id"], row["title"], row["company"])
         try:
             out = tailor(row, cv, config["tailoring"], out_root)
         except QuotaExhausted as e:
             log.warning("every tailoring model is out of quota for today (%s); the rest stay queued", e)
-            return
+            break
         if out is None:
             log.warning("could not tailor %s; it stays in the queue", row["id"])
             continue
         db.set_status(conn, row["id"], "shortlisted")
         log.info("wrote %s", out.relative_to(ROOT))
+        done += 1
+    return done
+
+
+def cmd_tailor(conn: sqlite3.Connection, config: dict, cv: dict, n: int | None, job_id: str | None) -> None:
+    n = n or config["scoring"]["shortlist_size"]
+    if job_id:
+        # Regenerates one job whatever its status, e.g. after editing the master CV or the prompts.
+        rows = conn.execute("SELECT * FROM jobs WHERE id = ? AND score IS NOT NULL", (job_id,)).fetchall()
+        tailor_rows(conn, config, cv, rows, 1)
+    else:
+        # Candidates beyond n stand in for any that fail to tailor.
+        tailor_rows(conn, config, cv, next_leads(conn, config, n * 2), n)
 
 
 def cmd_stats(conn: sqlite3.Connection) -> None:
@@ -150,6 +177,9 @@ def main() -> None:
     p.add_argument("--job", help="regenerate this job id instead")
     sub.add_parser("stats", help="counts by status")
     sub.add_parser("run", help="fetch, score and tailor the shortlist")
+    p = sub.add_parser("serve", help="the review page")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -169,6 +199,10 @@ def main() -> None:
         cmd_tailor(conn, config, load_yaml(args.cv), getattr(args, "n", None), getattr(args, "job", None))
     if args.command == "stats":
         cmd_stats(conn)
+    if args.command == "serve":
+        from .web import serve
+
+        serve(args.host, args.port, args.config, args.cv)
 
 
 if __name__ == "__main__":

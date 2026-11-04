@@ -45,8 +45,9 @@ search:
 
 scoring:
   # Tried in order; free-tier quotas are per model, so the next takes over when one runs out.
-  # groq/ entries need GROQ_API_KEY and are skipped without it.
-  models: [gemini-3.5-flash-lite, gemini-3.1-flash-lite, groq/openai/gpt-oss-120b]
+  # otari/ entries are routing policies on the Otari gateway (otari/routing.yml) and need OTARI_API_KEY;
+  # groq/ entries need GROQ_API_KEY. Either is skipped without its key, leaving the direct Gemini calls.
+  models: [otari/job-score, gemini-3.5-flash-lite, gemini-3.1-flash-lite, groq/openai/gpt-oss-120b]
   # Parallel requests; keep low on the free tier, whose per-minute limit is small.
   workers: 2
   # Cost guard: jobs scored per run, newest first.
@@ -56,8 +57,21 @@ scoring:
 
 tailoring:
   # Writing quality matters more here than at scoring, and it's only a handful of calls a day.
-  models: [gemini-3.6-flash, gemini-3.8-flash, groq/openai/gpt-oss-120b, gemini-3.5-flash-lite]
-  check_models: [gemini-3.6-flash, gemini-3.8-flash, groq/openai/gpt-oss-120b, gemini-3.5-flash-lite]
+  models: [otari/job-tailor, gemini-3.6-flash, gemini-3.8-flash, groq/openai/gpt-oss-120b, gemini-3.5-flash-lite]
+  check_models: [otari/job-check, gemini-3.6-flash, gemini-3.8-flash, groq/openai/gpt-oss-120b, gemini-3.5-flash-lite]
+
+applications:
+  # The Google Sheet that tracks applications (APPLICATIONS_SHEET_ID and a service account in .env).
+  # The tab is the gid in the sheet's URL.
+  sheet_gid: 1680940319
+  # The sheet's header names for each field; the header row is read to find the columns, so their
+  # order doesn't matter. Fields not listed here are left out of new rows.
+  columns:
+    date: Date
+    role: Role
+    company: Company
+  # Companies applied to within this many months are neither scored nor shortlisted.
+  exclude_months: 12
 
 sources:
   # UK boards. Both need free API keys in .env and are skipped with a warning without them.
