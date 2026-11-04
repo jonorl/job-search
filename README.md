@@ -17,6 +17,7 @@ Still to build: the web page, and a cron job on contabo.
 ```sh
 python -m venv .venv && .venv/bin/pip install -e .
 cp .env.example .env   # add GEMINI_API_KEY and the job board keys
+cp cv/master.example.yaml cv/master.yaml   # then fill in your CV
 
 .venv/bin/job-search run     # fetch, score and print the shortlist
 .venv/bin/job-search fetch   # or one step at a time

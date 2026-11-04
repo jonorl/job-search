@@ -1,0 +1,36 @@
+# Copy to cv/master.yaml (gitignored) and fill in. It is the only source of facts for scoring and
+# tailoring: tailored CVs may select, reorder and reword it, never add to it.
+
+name: Your Name
+contact:
+  email: you@example.com
+  github: github.com/you
+  portfolio: https://example.com
+  phones:
+  - +44 7000 000000
+summary: One or two sentences about you.
+projects:
+- name: Project
+  url: https://example.com/project
+  stack:
+  - Python
+  - PostgreSQL
+  description: What it does, in one line.
+skills:
+  Full-Stack:
+  - TypeScript
+  - Python
+  DevOps:
+  - Docker
+experience:
+- title: Software Engineer
+  company: Company
+  location: Remote
+  start: Jan 2024
+  end: Present
+  bullets:
+  - Something you did, with a number if you have one.
+education:
+- institution: University, City
+  degree: Degree
+  year: 2010

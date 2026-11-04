@@ -4,3 +4,5 @@ __pycache__/
 .env
 data/
 output/
+# Personal details; copy cv/master.example.yaml to start one.
+cv/master.yaml
