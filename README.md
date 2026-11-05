@@ -17,7 +17,9 @@ Finds remote software jobs I can do from where I am (worldwide, EMEA, or UK/EU r
 
    Companies applied to in the last 12 months (per the sheet) are neither scored nor shortlisted.
 
-Still to build: a cron job on contabo.
+## Deploying
+
+Pushes to `main` build `ghcr.io/jonorl/job-search` and restart it on the VPS (`.github/workflows/deploy.yml`, which needs the `GHCR_TOKEN`, `VPS_HOST`, `VPS_USER` and `VPS_SSH_KEY` secrets). The service, its nightly cron run, the password in front of the page and the backup are set up in [my-vps](https://github.com/jonorl/my-vps). The image holds no personal details: `.env`, the sheet's key, `cv/`, `data/` and `output/` are mounted from the server.
 
 ## Applications sheet
 

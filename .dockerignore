@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+*.egg-info
+__pycache__
+.env
+data
+output
+cv
+otari
