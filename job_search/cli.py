@@ -104,12 +104,14 @@ def next_leads(conn: sqlite3.Connection, config: dict, n: int) -> list[sqlite3.R
     taken |= {company_key(r["company"]) for r in conn.execute(
         "SELECT company FROM jobs WHERE status IN ('shortlisted', 'interested', 'applied')")}
     # One job per company, so a firm with several similar adverts can't take the whole shortlist.
+    # Jobs already scored from a source since switched off shouldn't come back as leads.
+    enabled = {name for name, cfg in config["sources"].items() if cfg}
     rows = []
     for row in conn.execute(
         "SELECT * FROM jobs WHERE status = 'scored' AND score >= ? ORDER BY score DESC, posted_at DESC",
         (config["scoring"]["min_score"],),
     ):
-        if company_key(row["company"]) not in taken:
+        if row["source"] in enabled and company_key(row["company"]) not in taken:
             taken.add(company_key(row["company"]))
             rows.append(row)
         if len(rows) == n:
@@ -146,8 +148,12 @@ def cmd_tailor(conn: sqlite3.Connection, config: dict, cv: dict, n: int | None, 
         rows = conn.execute("SELECT * FROM jobs WHERE id = ? AND score IS NOT NULL", (job_id,)).fetchall()
         tailor_rows(conn, config, cv, rows, 1)
     else:
+        stale = [r["id"] for r in conn.execute("SELECT id FROM jobs WHERE status = 'shortlisted'")]
         # Candidates beyond n stand in for any that fail to tailor.
-        tailor_rows(conn, config, cv, next_leads(conn, config, n * 2), n)
+        if tailor_rows(conn, config, cv, next_leads(conn, config, n * 2), n):
+            # A new batch replaces what was left unreviewed; a failed one leaves it in place.
+            for job_id in stale:
+                db.set_status(conn, job_id, "expired")
 
 
 def cmd_stats(conn: sqlite3.Connection) -> None:

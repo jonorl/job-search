@@ -83,7 +83,8 @@ sources:
     pages: 2
     max_days_old: 14
   remotive: true
-  remoteok: true
+  # RemoteOK is off: it charges candidates to apply.
+  remoteok: false
   himalayas:
     queries: [software engineer, developer]
     # ISO codes; each also returns worldwide jobs.

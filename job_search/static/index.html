@@ -67,6 +67,7 @@
 <script>
 const TABS = [
   ["shortlisted", "To review"], ["interested", "Interested"], ["applied", "Applied"], ["rejected", "Rejected"],
+  ["expired", "Expired"],
 ];
 let tab = "shortlisted", data = { jobs: [] }, timer;
 
@@ -75,16 +76,19 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 async function load() {
   data = await (await fetch("api/jobs")).json();
   render();
-  // Poll only while something is running in the background.
+  // Quick polls while background work runs; slow ones otherwise, to pick up a cron run's new batch.
   const busy = data.leads?.state === "working" || data.jobs.some(j => j.task?.state === "working");
   clearTimeout(timer);
-  if (busy) timer = setTimeout(load, 3000);
+  timer = setTimeout(load, busy ? 3000 : 30000);
 }
 
 async function act(body) {
-  const r = await fetch("api/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) alert((await r.json()).detail || r.statusText);
-  load();
+  try {
+    const r = await fetch("api/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) alert((await r.json().catch(() => ({}))).detail || r.statusText);
+  } finally {
+    load();
+  }
 }
 
 function render() {
