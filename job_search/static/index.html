@@ -86,6 +86,8 @@ async function act(body) {
   try {
     const r = await fetch("api/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) alert((await r.json().catch(() => ({}))).detail || r.statusText);
+    // Follow the job to where its questions are being answered.
+    else if (body.action === "interested") tab = "interested";
   } finally {
     load();
   }
