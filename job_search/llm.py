@@ -15,6 +15,7 @@ import time
 from typing import TypeVar
 
 import groq
+import httpx
 import openai
 from google import genai
 from google.genai import errors, types
@@ -38,6 +39,8 @@ class _Skip(Exception):
         self.strike = strike
 
 
+# Seconds per request; slow thinking calls finish well inside it.
+CALL_TIMEOUT = 120
 _lock = threading.Lock()
 _gemini: genai.Client | None = None
 _chat_clients: dict[str, groq.Groq | openai.OpenAI] = {}
@@ -60,7 +63,8 @@ def _gemini_client() -> genai.Client:
     # would leave the loser's in-flight request on a closed client.
     with _lock:
         if _gemini is None:
-            _gemini = genai.Client()
+            # The SDK waits forever by default, which leaves a hung call holding up the whole chain.
+            _gemini = genai.Client(http_options=types.HttpOptions(timeout=CALL_TIMEOUT * 1000))
         return _gemini
 
 
@@ -78,6 +82,7 @@ def _chat_client(backend: str) -> groq.Groq | openai.OpenAI:
                     base_url=os.environ.get("OTARI_BASE_URL") or "https://api.otari.ai/api/v1",
                     api_key=api_key,
                     max_retries=0,
+                    timeout=CALL_TIMEOUT,
                 )
         return _chat_clients[backend]
 
@@ -132,6 +137,9 @@ def _call_gemini(model: str, system: str, prompt: str, schema: type[T], thinking
             delay = re.search(r"'retryDelay': '(\d+)s'", str(e))
             _wait(model, int(delay.group(1)) if delay else None, attempt)
             continue
+        except httpx.TimeoutException:
+            # Another full wait on the same model is worse than moving down the chain.
+            raise _Skip(f"no answer within {CALL_TIMEOUT}s", strike=True)
         except errors.ServerError as e:
             unavailable += 1
             if unavailable >= 2:

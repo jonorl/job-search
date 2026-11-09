@@ -45,6 +45,11 @@
   .actions .applied { border-color: var(--good); color: var(--good); }
   .actions .reject { border-color: var(--bad); color: var(--bad); }
   .actions .interested { border-color: var(--accent); color: var(--accent); }
+  .actions button:disabled { opacity: .5; cursor: default; }
+  .toolbar { margin: 0 0 14px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px;
+    border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .qa { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
   .qa textarea, .qa input { width: 100%; font: inherit; padding: 8px; border-radius: 7px; border: 1px solid var(--line);
     background: var(--bg); color: var(--text); margin: 4px 0 8px; }
@@ -69,13 +74,30 @@ const TABS = [
   ["shortlisted", "To review"], ["interested", "Interested"], ["applied", "Applied"], ["rejected", "Rejected"],
   ["expired", "Expired"],
 ];
-let tab = "shortlisted", data = { jobs: [] }, timer;
+let tab = "shortlisted", data = { jobs: [] }, timer, last = "";
+// Each poll redraws the list, so what the user has opened or typed lives here rather than in the DOM.
+const opened = {}, drafts = {};
+document.addEventListener("toggle", e => { if (e.target.dataset.key) opened[e.target.dataset.key] = e.target.open; }, true);
+document.addEventListener("input", e => { if (e.target.id) drafts[e.target.id] = e.target.value; });
+const isOpen = (key, byDefault = false) => (opened[key] ?? byDefault) ? "open" : "";
 
+const spin = task => task?.state === "working" ? `<span class="spinner" aria-hidden="true"></span>` : "";
+// Elapsed time is ticked here rather than sent by the server, so polls don't redraw the page every few seconds.
+const since = task => task?.state === "working" ? ` <span class="elapsed meta" data-started="${task.started}"></span>` : "";
+setInterval(() => document.querySelectorAll(".elapsed").forEach(el => {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - el.dataset.started));
+  el.textContent = `(${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")})`;
+}), 1000);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 async function load() {
-  data = await (await fetch("api/jobs")).json();
-  render();
+  const text = await (await fetch("api/jobs")).text();
+  // Redrawing an unchanged list would only interrupt whatever the user is reading or typing.
+  if (text !== last) {
+    last = text;
+    data = JSON.parse(text);
+    render();
+  }
   // Quick polls while background work runs; slow ones otherwise, to pick up a cron run's new batch.
   const busy = data.leads?.state === "working" || data.jobs.some(j => j.task?.state === "working");
   clearTimeout(timer);
@@ -86,9 +108,11 @@ async function act(body) {
   try {
     const r = await fetch("api/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) alert((await r.json().catch(() => ({}))).detail || r.statusText);
-    // Follow the job to where its questions are being answered.
+    // Follow the job to where its questions are being answered; after applying, back to the queue.
     else if (body.action === "interested") tab = "interested";
+    else if (body.action === "applied") tab = "shortlisted";
   } finally {
+    render();
     load();
   }
 }
@@ -101,12 +125,12 @@ function render() {
 
   const l = data.leads;
   document.getElementById("banner").innerHTML = l
-    ? `<div class="banner ${l.state === "error" ? "error" : ""}">${esc(l.message)}</div>` : "";
+    ? `<div class="banner ${l.state === "error" ? "error" : ""}">${spin(l)}${esc(l.message)}${since(l)}</div>` : "";
 
   const jobs = data.jobs.filter(j => j.status === tab);
-  document.getElementById("list").innerHTML = jobs.length
-    ? jobs.map(card).join("")
-    : `<p class="empty">Nothing here.${tab === "shortlisted" ? ` <a href="#" onclick="act({action:'lead'});return false">Tailor another lead</a>` : ""}</p>`;
+  const more = tab === "shortlisted"
+    ? `<div class="actions toolbar"><button onclick="act({action:'lead'})" ${l?.state === "working" ? "disabled" : ""}>Add 1 more lead</button></div>` : "";
+  document.getElementById("list").innerHTML = more + (jobs.length ? jobs.map(card).join("") : `<p class="empty">Nothing here.</p>`);
 }
 
 function card(j) {
@@ -139,11 +163,11 @@ function card(j) {
       ${pdfs}
     </div>
     ${warnings.length ? `<div class="warn"><strong>Read the letter first:</strong><ul>${warnings.map(w => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
-    <details><summary>Why it fits${d.gaps?.length ? " and gaps" : ""}</summary>
+    <details data-key="fit-${esc(j.folder)}" ${isOpen("fit-" + j.folder)}><summary>Why it fits${d.gaps?.length ? " and gaps" : ""}</summary>
       <ul class="plus">${(d.reasons || []).map(r => `<li>${esc(r)}</li>`).join("")}</ul>
       <ul class="minus">${(d.gaps || []).map(g => `<li>${esc(g)}</li>`).join("")}</ul>
     </details>
-    ${reverted.length ? `<details><summary>${reverted.length} CV line${reverted.length > 1 ? "s" : ""} put back to the original</summary>
+    ${reverted.length ? `<details data-key="rev-${esc(j.folder)}" ${isOpen("rev-" + j.folder)}><summary>${reverted.length} CV line${reverted.length > 1 ? "s" : ""} put back to the original</summary>
       <ul>${reverted.map(([k, v]) => `<li>${esc(v)}</li>`).join("")}</ul></details>` : ""}
     ${j.status === "interested" ? questions(j, id) : ""}
     <div class="actions">${actions}</div>
@@ -152,14 +176,14 @@ function card(j) {
 
 function questions(j, id) {
   const t = j.task, a = j.application;
-  const box = `<details ${a ? "" : "open"}><summary>${a ? "Answer again" : "Questions"}</summary>
+  const box = `<details data-key="qs-${esc(j.folder)}" ${isOpen("qs-" + j.folder, !a)}><summary>${a ? "Answer again" : "Questions"}</summary>
       <label class="meta">Application page URL (Greenhouse jobs are read automatically)</label>
-      <input id="url-${esc(j.folder)}" placeholder="${esc(j.apply_url || "")}">
+      <input id="url-${esc(j.folder)}" placeholder="${esc(j.apply_url || "")}" value="${esc(drafts["url-" + j.folder])}">
       <label class="meta">…or paste the form's questions</label>
-      <textarea id="q-${esc(j.folder)}"></textarea>
+      <textarea id="q-${esc(j.folder)}">${esc(drafts["q-" + j.folder])}</textarea>
       <button onclick='ask(${id}, ${esc(JSON.stringify(j.folder))})'>Answer</button>
     </details>`;
-  const status = t ? `<p class="${t.state === "error" ? "warn" : "meta"}">${esc(t.message)}</p>` : "";
+  const status = t ? `<p class="${t.state === "error" ? "warn" : "meta"}">${spin(t)}${esc(t.message)}${since(t)}</p>` : "";
   const answers = a ? a.answers.map((x, i) => `<div class="answer">
       <div class="q">${esc(x.question)}</div>
       ${x.needs_input ? `<div class="warn">Needs you: ${esc(x.note)}</div>`
@@ -173,6 +197,8 @@ function questions(j, id) {
 function ask(id, folder) {
   act({ id, action: "interested", url: document.getElementById("url-" + folder).value,
         questions: document.getElementById("q-" + folder).value });
+  delete drafts["url-" + folder];
+  delete drafts["q-" + folder];
 }
 
 function copy(button) {

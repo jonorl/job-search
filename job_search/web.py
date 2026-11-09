@@ -8,6 +8,7 @@ applied records the application in the Google Sheet. Bind it to localhost and pu
 import json
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
@@ -35,6 +36,9 @@ _tasks: dict[str, dict] = {}
 # One at a time, so two rejects in a row don't both pick the same next job.
 _leads = ThreadPoolExecutor(max_workers=1)
 _answers = ThreadPoolExecutor(max_workers=2)
+# Past these, a task is reported as failed. The thread can't be stopped, so if it does finish later
+# its result still replaces the error. Tailoring makes several more calls than answering.
+LIMITS = {"leads": 15 * 60, "answer": 8 * 60}
 
 
 def _load(path: Path) -> dict:
@@ -59,9 +63,20 @@ def _row(conn, job_id: str):
 def _set_task(key: str, **state) -> None:
     with _lock:
         if state:
+            if state.get("state") == "working":
+                state["started"] = time.time()
             _tasks[key] = state
         else:
             _tasks.pop(key, None)
+
+
+def _task(key: str) -> dict | None:
+    task = _tasks.get(key)
+    limit = LIMITS["leads" if key == "leads" else "answer"]
+    if task and task["state"] == "working" and time.time() - task["started"] > limit:
+        return {"state": "error", "message": f"No result after {limit // 60} minutes; the models are probably "
+                "overloaded or rate-limited. Try again later, or check the server log."}
+    return task
 
 
 def _next_lead() -> None:
@@ -118,10 +133,10 @@ def jobs():
                 "folder": folder.relative_to(OUTPUT).as_posix(),
                 "files": sorted(p.name for p in folder.glob("*.pdf")),
                 "application": json.loads(app_file.read_text()) if app_file.exists() else None,
-                "task": _tasks.get(job_id),
+                "task": _task(job_id),
             })
         items.sort(key=lambda j: (-j["score"], j["folder"]))
-        return {"jobs": items, "leads": _tasks.get("leads")}
+        return {"jobs": items, "leads": _task("leads")}
     finally:
         conn.close()
 
