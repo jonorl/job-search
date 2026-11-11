@@ -1,0 +1,175 @@
+# Written by `job-search discover` on 2026-11-10 from remoteintech/remote-jobs.
+# Rerun it to refresh rather than editing this; hand-picked boards go in config.yaml.
+# A source set to false in config.yaml switches its boards here off too.
+ashby:
+  airbyte: Airbyte
+  alan: Alan
+  andela: Andela
+  appcues: Appcues
+  buffer: Buffer
+  calibre: Calibre
+  capchase: Capchase
+  caremessage: CareMessage
+  clickup: ClickUp
+  close: Close
+  consensys: ConsenSys Inc
+  dave: Dave
+  deel: Deel
+  flip: Flip
+  ghost: Ghost
+  gitbook: Gitbook
+  glitch: Glitch
+  gruntwork: Gruntwork
+  helpscout: Help Scout
+  hopper: Hopper
+  hubstaff: Hubstaff
+  influxdata: InfluxData
+  instructure: Instructure
+  joor: JOOR
+  kestra: Kestra
+  kindred: Kindred
+  kraken.com: Kraken
+  lightspeed: Lightspeed
+  linear: Linear
+  luxor: Luxor Technology
+  mapbox: Mapbox
+  mux: Mux
+  oyster: Oyster HR
+  percona: Percona
+  pleo: Pleo
+  posthog: PostHog
+  primer.io: Primer
+  quora: Quora
+  railway: Railway
+  recharge: ReCharge Payments
+  replit: Replit
+  resend: Resend
+  revenuecat: RevenueCat
+  scribdinc: Scribd
+  searchapi: SearchApi
+  stickermule: Sticker Mule
+  supabase: Supabase
+  svix: Svix
+  temporal: Temporal
+  testgorilla: TestGorilla
+  tribe-xyz: Tribe
+  webfx: WebFX
+  workos: WorkOS
+  yazio: YAZIO
+  zapier: Zapier
+greenhouse:
+  appinio: Appinio
+  asana: Asana
+  beyond: BeyondPricing
+  bitwarden: Bitwarden
+  brave: Brave
+  cabify: Cabify
+  canonical: Canonical
+  chainguard: Chainguard
+  circleci: CircleCI
+  civicactions: CivicActions
+  coinbase: Coinbase
+  consensys: MetaMask
+  customerio: Customer.io
+  dashlane: Dashlane
+  datacamp: DataCamp
+  datadog: Datadog
+  dropbox: Dropbox
+  ebury: Ebury
+  elastic: Elastic
+  epicgames: Epic Games
+  ergeon: Ergeon
+  fingerprint: Fingerprint
+  fleetio: fleetio
+  flip: Flip
+  generalassembly: General Assembly
+  ghost: Ghost
+  gitlab: GitLab
+  godaddy: GoDaddy
+  grafanalabs: Grafana Labs
+  hudl: Hudl
+  intercom: Intercom
+  karat: Karat
+  khanacademy: Khan Academy
+  knack: Knack
+  kona: Kona
+  labelbox: Labelbox
+  launchpotato: Launch Potato
+  liveperson: LivePerson
+  logos: Status
+  mariadbplc: MariaDB
+  mattermost: Mattermost
+  metalab: MetaLab
+  mixmax: Mixmax
+  mongodb: MongoDB
+  muckrack: Muck Rack
+  nearform: Nearform
+  netlify: Netlify
+  noredink: NoRedInk
+  octopusdeploy: Octopus Deploy
+  oddball: Oddball
+  okta: Okta
+  openzeppelin: OpenZeppelin
+  seatgeek: SeatGeek
+  smugmug: SmugMug
+  sourcegraph91: Sourcegraph
+  streamnative: StreamNative
+  stripe: Stripe
+  tailscale: Tailscale
+  thrivemarket: Thrive Market
+  tide: Tide
+  togetherwork: Jackson River
+  turing: Turing
+  udacity: Udacity
+  vercel: Vercel
+  voxmedia: Vox Media (Product Team)
+  zenrows: ZenRows
+lever:
+  15five: 15Five
+  appen-2: Appen
+  articulate: Articulate
+  britecore: BriteCore
+  collabora: Collabora
+  contentsquare: Hotjar
+  findem: Findem
+  heetch: Heetch
+  kinsta: Kinsta
+  mindful: Mindful
+  perforce: Puppet
+  prominentedge: Prominent Edge
+  renofi: RenoFi
+  sonatype: Sonatype
+  spotify: Spotify
+  spreedly: Spreedly
+  sysdig: Sysdig
+  toptal: Toptal
+personio:
+  giant-swarm: Giant Swarm
+recruitee:
+  intent: Intent
+  madewithlove: madewithlove
+  rebelmouse: RebelMouse
+  timedoctor: Time Doctor
+smartrecruiters:
+  Renaissance: Renaissance
+  SeaplaneIOInc: Seaplane
+teamtailor:
+  careers.elsewhen.com: Elsewhen
+  careers.phantombuster.com: PhantomBuster
+  thecasumolimited: Casumo
+  varnish-software: Varnish Software
+workable:
+  balena: Balena
+  bandlabtechnologies: BandLab
+  cloudlinux-1: CloudLinux
+  devsquad: Devsquad
+  huggingface: Hugging Face
+  humanmade: Human Made
+  imachines: Intuition Machines, Inc.
+  mixcloud-limited: Mixcloud
+  remotebase: RemoteBase
+  seeq: Seeq
+  skillshare: Skillshare
+  uncapped: Uncapped
+  ushahidi: Ushahidi
+  wp-media: WP-Media

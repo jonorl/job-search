@@ -7,9 +7,14 @@ import html
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+from pathlib import Path
+from xml.etree import ElementTree
 
 import httpx
+import yaml
 
 from .models import Job
 
@@ -142,74 +147,264 @@ def arbeitnow(client: httpx.Client, cfg) -> list[Job]:
     return jobs
 
 
-def greenhouse(client: httpx.Client, slugs: list[str]) -> list[Job]:
+# Company job boards. Each takes one board and raises if it's gone; `_boards` runs them over a list.
+# A board is a slug, or in boards.yaml a slug with the company name, since some APIs only give the slug.
+
+
+def _greenhouse(client: httpx.Client, slug: str, name: str) -> list[Job]:
+    r = client.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs", params={"content": "true"})
+    r.raise_for_status()
     jobs = []
-    for slug in slugs:
-        data = client.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs", params={"content": "true"}).json()
-        for j in data.get("jobs", []):
-            location = (j.get("location") or {}).get("name", "")
-            jobs.append(Job(
-                source="greenhouse",
-                external_id=str(j["id"]),
-                title=j["title"],
-                company=j.get("company_name") or slug,
-                url=j["absolute_url"],
-                description=strip_html(j.get("content")),
-                location=location,
-                remote="remote" in location.lower(),
-                posted_at=from_iso(j.get("first_published") or j.get("updated_at")),
-            ))
+    for j in r.json().get("jobs", []):
+        location = (j.get("location") or {}).get("name", "")
+        jobs.append(Job(
+            source="greenhouse",
+            external_id=str(j["id"]),
+            title=j["title"],
+            company=j.get("company_name") or name,
+            url=j["absolute_url"],
+            description=strip_html(j.get("content")),
+            location=location,
+            remote="remote" in location.lower(),
+            posted_at=from_iso(j.get("first_published") or j.get("updated_at")),
+        ))
     return jobs
 
 
-def lever(client: httpx.Client, slugs: list[str]) -> list[Job]:
+def _lever(client: httpx.Client, slug: str, name: str, host: str = "api.lever.co", source: str = "lever") -> list[Job]:
+    r = client.get(f"https://{host}/v0/postings/{slug}", params={"mode": "json"})
+    r.raise_for_status()
     jobs = []
-    for slug in slugs:
-        for j in client.get(f"https://api.lever.co/v0/postings/{slug}", params={"mode": "json"}).json():
-            cats = j.get("categories") or {}
-            parts = [j.get("descriptionPlain") or ""]
-            parts += [f"{s['text']}\n{strip_html(s['content'])}" for s in j.get("lists") or []]
-            parts.append(j.get("additionalPlain") or "")
-            jobs.append(Job(
-                source="lever",
-                external_id=j["id"],
-                title=j["text"],
-                company=slug,
-                url=j["hostedUrl"],
-                apply_url=j.get("applyUrl") or "",
-                description="\n\n".join(p for p in parts if p),
-                location=", ".join(filter(None, [cats.get("location"), j.get("country")])),
-                remote=j.get("workplaceType") == "remote",
-                posted_at=from_epoch(j.get("createdAt")),
-            ))
+    for j in r.json():
+        cats = j.get("categories") or {}
+        parts = [j.get("descriptionPlain") or ""]
+        parts += [f"{s['text']}\n{strip_html(s['content'])}" for s in j.get("lists") or []]
+        parts.append(j.get("additionalPlain") or "")
+        jobs.append(Job(
+            source=source,
+            external_id=j["id"],
+            title=j["text"],
+            company=name,
+            url=j["hostedUrl"],
+            apply_url=j.get("applyUrl") or "",
+            description="\n\n".join(p for p in parts if p),
+            location=", ".join(filter(None, [cats.get("location"), j.get("country")])),
+            remote=j.get("workplaceType") == "remote",
+            posted_at=from_epoch(j.get("createdAt")),
+        ))
     return jobs
 
 
-def ashby(client: httpx.Client, slugs: list[str]) -> list[Job]:
+def _lever_eu(client: httpx.Client, slug: str, name: str) -> list[Job]:
+    # EU-hosted Lever accounts live on a separate API that doesn't know about the US ones.
+    return _lever(client, slug, name, host="api.eu.lever.co", source="lever_eu")
+
+
+def _ashby(client: httpx.Client, slug: str, name: str) -> list[Job]:
+    r = client.get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}", params={"includeCompensation": "true"})
+    r.raise_for_status()
     jobs = []
-    for slug in slugs:
-        data = client.get(
-            f"https://api.ashbyhq.com/posting-api/job-board/{slug}", params={"includeCompensation": "true"}
-        ).json()
-        for j in data.get("jobs", []):
-            if not j.get("isListed", True):
-                continue
-            country = ((j.get("address") or {}).get("postalAddress") or {}).get("addressCountry")
-            secondary = [s.get("location", "") for s in j.get("secondaryLocations") or []]
-            jobs.append(Job(
-                source="ashby",
-                external_id=j["id"],
-                title=j["title"],
-                company=slug,
-                url=j["jobUrl"],
-                apply_url=j.get("applyUrl") or "",
-                description=j.get("descriptionPlain") or strip_html(j.get("descriptionHtml")),
-                location=", ".join(filter(None, [j.get("location"), country, *secondary])),
-                remote=bool(j.get("isRemote")) or j.get("workplaceType") == "Remote",
-                salary=((j.get("compensation") or {}).get("compensationTierSummary")) or "",
-                posted_at=from_iso(j.get("publishedAt")),
-            ))
+    for j in r.json().get("jobs", []):
+        if not j.get("isListed", True):
+            continue
+        country = ((j.get("address") or {}).get("postalAddress") or {}).get("addressCountry")
+        secondary = [s.get("location", "") for s in j.get("secondaryLocations") or []]
+        jobs.append(Job(
+            source="ashby",
+            external_id=j["id"],
+            title=j["title"],
+            company=name,
+            url=j["jobUrl"],
+            apply_url=j.get("applyUrl") or "",
+            description=j.get("descriptionPlain") or strip_html(j.get("descriptionHtml")),
+            location=", ".join(filter(None, [j.get("location"), country, *secondary])),
+            remote=bool(j.get("isRemote")) or j.get("workplaceType") == "Remote",
+            salary=((j.get("compensation") or {}).get("compensationTierSummary")) or "",
+            posted_at=from_iso(j.get("publishedAt")),
+        ))
     return jobs
+
+
+def _workable(client: httpx.Client, slug: str, name: str) -> list[Job]:
+    r = client.get(f"https://apply.workable.com/api/v1/widget/accounts/{slug}", params={"details": "true"})
+    r.raise_for_status()
+    data = r.json()
+    jobs = []
+    for j in data.get("jobs", []):
+        places = j.get("locations") or [j]
+        location = "; ".join(", ".join(filter(None, [p.get("city"), p.get("country")])) for p in places)
+        jobs.append(Job(
+            source="workable",
+            external_id=f"{slug}/{j['shortcode']}",
+            title=j["title"],
+            company=data.get("name") or name,
+            url=j.get("url") or j.get("shortlink") or f"https://apply.workable.com/{slug}/j/{j['shortcode']}/",
+            apply_url=j.get("application_url") or "",
+            description=strip_html(j.get("description")),
+            location=location,
+            remote=bool(j.get("telecommuting")),
+            posted_at=from_iso(j.get("published_on") or j.get("created_at")),
+        ))
+    return jobs
+
+
+def _recruitee(client: httpx.Client, slug: str, name: str) -> list[Job]:
+    r = client.get(f"https://{slug}.recruitee.com/api/offers/")
+    r.raise_for_status()
+    jobs = []
+    for j in r.json().get("offers", []):
+        jobs.append(Job(
+            source="recruitee",
+            external_id=f"{slug}/{j['id']}",
+            title=j["title"],
+            company=j.get("company_name") or name,
+            url=j.get("careers_url") or "",
+            apply_url=j.get("careers_apply_url") or "",
+            description=strip_html(f"{j.get('description') or ''}\n{j.get('requirements') or ''}"),
+            location=j.get("location") or ", ".join(filter(None, [j.get("city"), j.get("country")])),
+            remote=bool(j.get("remote")),
+            posted_at=from_iso((j.get("published_at") or "").replace(" UTC", "Z").replace(" ", "T") or None),
+        ))
+    return jobs
+
+
+def _personio(client: httpx.Client, slug: str, name: str) -> list[Job]:
+    r = client.get(f"https://{slug}.jobs.personio.de/xml", params={"language": "en"})
+    r.raise_for_status()
+    jobs = []
+    for p in ElementTree.fromstring(r.content).iter("position"):
+        text = lambda tag: (p.findtext(tag) or "").strip()
+        offices = [text("office"), *[(o.text or "").strip() for o in p.iter("additionalOffice")]]
+        location = ", ".join(filter(None, offices))
+        description = "\n\n".join(
+            f"{d.findtext('name') or ''}\n{strip_html(d.findtext('value'))}" for d in p.iter("jobDescription"))
+        jobs.append(Job(
+            source="personio",
+            external_id=f"{slug}/{text('id')}",
+            title=text("name"),
+            company=text("subcompany") or name,
+            url=f"https://{slug}.jobs.personio.de/job/{text('id')}",
+            description=description,
+            location=location,
+            # Personio has no remote flag; companies put it in the office name instead.
+            remote=True if "remote" in location.lower() else None,
+            posted_at=from_iso(text("createdAt") or None),
+        ))
+    return jobs
+
+
+def _teamtailor(client: httpx.Client, slug: str, name: str) -> list[Job]:
+    # Many Teamtailor sites sit on the company's own domain, so the board can be a full host.
+    host = slug if "." in slug else f"{slug}.teamtailor.com"
+    r = client.get(f"https://{host}/jobs.rss")
+    r.raise_for_status()
+    root = ElementTree.fromstring(r.content)
+    company = name or (root.findtext("channel/title") or slug)
+    ns = {"tt": "https://teamtailor.com/locations"}
+    jobs = []
+    for item in root.iter("item"):
+        places = [", ".join(filter(None, [loc.findtext("tt:city", "", ns), loc.findtext("tt:country", "", ns)]))
+                  for loc in item.findall("tt:locations/tt:location", ns)]
+        status = item.findtext("remoteStatus") or ""
+        jobs.append(Job(
+            source="teamtailor",
+            external_id=f"{host}/{item.findtext('guid')}",
+            title=(item.findtext("title") or "").strip(),
+            company=company,
+            url=item.findtext("link") or "",
+            description=strip_html(item.findtext("description")),
+            location="; ".join(filter(None, places)) or ("Remote" if status == "fully" else ""),
+            remote=status == "fully" if status else None,
+            posted_at=parsedate_to_datetime(item.findtext("pubDate")) if item.findtext("pubDate") else None,
+        ))
+    return jobs
+
+
+def _smartrecruiters(client: httpx.Client, slug: str, name: str) -> list[Job]:
+    jobs, offset = [], 0
+    while True:
+        r = client.get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings",
+                       params={"limit": 100, "offset": offset})
+        r.raise_for_status()
+        data = r.json()
+        for j in data.get("content", []):
+            loc = j.get("location") or {}
+            jobs.append(Job(
+                source="smartrecruiters",
+                external_id=f"{slug}/{j['id']}",
+                title=j["name"],
+                company=(j.get("company") or {}).get("name") or name,
+                url=f"https://jobs.smartrecruiters.com/{slug}/{j['id']}",
+                # The list has no advert text; enrich fetches it for the jobs that pass the filters.
+                description="",
+                location=loc.get("fullLocation") or ", ".join(filter(None, [loc.get("city"), loc.get("country")])),
+                remote=bool(loc.get("remote")),
+                posted_at=from_iso(j.get("releasedDate")),
+            ))
+        offset += 100
+        if offset >= data.get("totalFound", 0):
+            return jobs
+
+
+def smartrecruiters_details(client: httpx.Client, external_id: str) -> dict:
+    slug, job_id = external_id.split("/", 1)
+    r = client.get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{job_id}")
+    r.raise_for_status()
+    data = r.json()
+    sections = ((data.get("jobAd") or {}).get("sections") or {}).values()
+    text = "\n\n".join(f"{s.get('title') or ''}\n{strip_html(s.get('text'))}" for s in sections if s.get("text"))
+    return {"description": text, "apply_url": data.get("applyUrl")}
+
+
+BOARDS = {
+    "greenhouse": _greenhouse,
+    "lever": _lever,
+    "lever_eu": _lever_eu,
+    "ashby": _ashby,
+    "workable": _workable,
+    "recruitee": _recruitee,
+    "personio": _personio,
+    "teamtailor": _teamtailor,
+    "smartrecruiters": _smartrecruiters,
+}
+
+
+def _boards(source: str):
+    def fetch(client: httpx.Client, boards: list | dict) -> list[Job]:
+        boards = boards if isinstance(boards, dict) else {slug: slug for slug in boards}
+        # Hundreds of small boards one after another would take most of the run.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = pool.map(lambda b: _board(client, source, *b), boards.items())
+            found = [r for r in results if r is not None]
+        if len(found) < len(boards):
+            log.warning("%s: %d of %d boards failed", source, len(boards) - len(found), len(boards))
+        return [j for jobs in found for j in jobs]
+    return fetch
+
+
+def _board(client: httpx.Client, source: str, slug: str, name: str | None) -> list[Job] | None:
+    try:
+        return BOARDS[source](client, slug, name or slug)
+    except (httpx.HTTPError, ValueError, KeyError, ElementTree.ParseError) as e:
+        # Boards close or move; one gone shouldn't take the rest of the source with it.
+        log.info("%s board %s failed: %r", source, slug, e)
+        return None
+
+
+def load_boards(path: Path) -> dict[str, dict[str, str]]:
+    return yaml.safe_load(path.read_text()) or {} if path.exists() else {}
+
+
+def with_boards(sources_cfg: dict, boards: dict[str, dict[str, str]]) -> dict:
+    """The sources config with discovered boards added; a source set to false in the config stays off."""
+    merged = dict(sources_cfg)
+    for source, found in boards.items():
+        own = sources_cfg.get(source)
+        if own is False:
+            continue
+        own = own if isinstance(own, dict) else {slug: slug for slug in own or []}
+        merged[source] = {**found, **own}
+    return merged
 
 
 def uk_location(name: str | None) -> str:
@@ -301,9 +496,7 @@ FETCHERS = {
     "remoteok": remoteok,
     "himalayas": himalayas,
     "arbeitnow": arbeitnow,
-    "greenhouse": greenhouse,
-    "lever": lever,
-    "ashby": ashby,
+    **{name: _boards(name) for name in BOARDS},
 }
 
 
@@ -325,7 +518,7 @@ def fetch_all(sources_cfg: dict) -> list[Job]:
 
 
 # Sources whose search results are snippets, with a call that returns the full advert.
-ENRICHERS = {"reed": reed_details}
+ENRICHERS = {"reed": reed_details, "smartrecruiters": smartrecruiters_details}
 
 
 def enrich(jobs: list[Job]) -> dict[str, dict]:

@@ -26,7 +26,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     filter_reason TEXT,
     score INTEGER,
     score_detail TEXT,
-    scored_at TEXT
+    scored_at TEXT,
+    -- Added by migrations/0001_applied_at.sql on existing databases.
+    applied_at TEXT
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs (status);
 """
@@ -81,6 +83,12 @@ def set_score(conn: sqlite3.Connection, job_id: str, score: int, detail: dict) -
         "UPDATE jobs SET status = 'scored', score = ?, score_detail = ?, scored_at = ? WHERE id = ?",
         (score, json.dumps(detail), datetime.now(UTC).isoformat(), job_id),
     )
+    conn.commit()
+
+
+def set_applied(conn: sqlite3.Connection, job_id: str) -> None:
+    conn.execute("UPDATE jobs SET status = 'applied', applied_at = ? WHERE id = ?",
+                 (datetime.now(UTC).isoformat(), job_id))
     conn.commit()
 
 

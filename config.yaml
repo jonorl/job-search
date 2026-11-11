@@ -72,6 +72,8 @@ applications:
     company: Company
   # Companies applied to within this many months are neither scored nor shortlisted.
   exclude_months: 12
+  # Applications a day to aim for; the review page counts towards it.
+  daily_target: 5
 
 sources:
   # UK boards. Both need free API keys in .env and are skipped with a warning without them.
@@ -92,8 +94,17 @@ sources:
     pages: 3
   arbeitnow:
     pages: 5
-  # Company job boards. The slug is the bit after the board's domain,
-  # e.g. job-boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>.
+  # Company job boards, read directly. Most come from boards.yaml, which `job-search discover` writes;
+  # list extra ones here. The slug is the bit after the board's domain, e.g. job-boards.greenhouse.io/<slug>,
+  # jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>, apply.workable.com/<slug>, <slug>.recruitee.com,
+  # <slug>.jobs.personio.de, <slug>.teamtailor.com (or the site's own host), jobs.smartrecruiters.com/<slug>.
+  # Setting a system to false here switches off its boards in boards.yaml too.
   greenhouse: [gitlab]
   lever: []
+  lever_eu: []
   ashby: [linear]
+  workable: []
+  recruitee: []
+  personio: []
+  teamtailor: []
+  smartrecruiters: []

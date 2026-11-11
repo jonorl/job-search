@@ -124,19 +124,21 @@ def jobs():
     try:
         items = []
         for job_id, folder in _outputs().items():
-            row = conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            row = conn.execute("SELECT status, applied_at FROM jobs WHERE id = ?", (job_id,)).fetchone()
             data = json.loads((folder / "job.json").read_text())
             app_file = folder / "application.json"
             items.append({
                 **data,
                 "status": row["status"] if row else "unknown",
+                "applied_at": row["applied_at"] if row else None,
                 "folder": folder.relative_to(OUTPUT).as_posix(),
                 "files": sorted(p.name for p in folder.glob("*.pdf")),
                 "application": json.loads(app_file.read_text()) if app_file.exists() else None,
                 "task": _task(job_id),
             })
         items.sort(key=lambda j: (-j["score"], j["folder"]))
-        return {"jobs": items, "leads": _task("leads")}
+        target = _load(_paths["config"])["applications"].get("daily_target", 5)
+        return {"jobs": items, "leads": _task("leads"), "daily_target": target}
     finally:
         conn.close()
 
@@ -179,7 +181,7 @@ def action(a: Action):
             except SheetError as e:
                 # Left unchanged, so applied is only shown once the sheet has it.
                 raise HTTPException(502, f"Couldn't update the spreadsheet: {e}")
-            db.set_status(conn, a.id, "applied")
+            db.set_applied(conn, a.id)
         elif a.action == "undo":
             db.set_status(conn, a.id, "shortlisted")
         else:

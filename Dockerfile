@@ -5,7 +5,7 @@ COPY pyproject.toml ./
 COPY job_search ./job_search
 # Editable, so the code's ROOT stays /app, where templates, fonts and the mounted data live.
 RUN pip install --no-cache-dir -e .
-COPY config.yaml ./
+COPY config.yaml boards.yaml ./
 COPY templates ./templates
 COPY fonts ./fonts
 

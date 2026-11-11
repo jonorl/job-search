@@ -18,7 +18,11 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
   main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 22px; margin: 0 0 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+  .today { font-weight: 600; padding: 4px 12px; border-radius: 999px; background: var(--chip); white-space: nowrap; }
+  .today.done { color: var(--good); }
+  .applied-on { color: var(--good); font-size: 13px; margin-top: 2px; }
   nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
   nav button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px;
     padding: 5px 14px; cursor: pointer; font: inherit; }
@@ -64,7 +68,7 @@
 </head>
 <body>
 <main>
-  <h1>Job applications</h1>
+  <header><h1>Job applications</h1><div id="today" class="today"></div></header>
   <nav id="tabs"></nav>
   <div id="banner"></div>
   <div id="list"></div>
@@ -117,7 +121,18 @@ async function act(body) {
   }
 }
 
+// Days are the browser's, so "today" is Kampala's rather than the server's UTC.
+const dayOf = iso => new Date(iso).toLocaleDateString("en-CA");
+const ddmmyyyy = iso => new Date(iso).toLocaleDateString("en-GB");
+
 function render() {
+  const today = dayOf(new Date().toISOString());
+  const done = data.jobs.filter(j => j.status === "applied" && j.applied_at && dayOf(j.applied_at) === today).length;
+  const target = data.daily_target || 5;
+  const counter = document.getElementById("today");
+  counter.textContent = `Applied today: ${done}/${target}`;
+  counter.classList.toggle("done", done >= target);
+
   document.getElementById("tabs").innerHTML = TABS.map(([key, label]) => {
     const n = data.jobs.filter(j => j.status === key).length;
     return `<button aria-pressed="${key === tab}" onclick="tab='${key}';render()">${label} (${n})</button>`;
@@ -128,6 +143,8 @@ function render() {
     ? `<div class="banner ${l.state === "error" ? "error" : ""}">${spin(l)}${esc(l.message)}${since(l)}</div>` : "";
 
   const jobs = data.jobs.filter(j => j.status === tab);
+  // Most recent first; jobs applied before dates were recorded go last.
+  if (tab === "applied") jobs.sort((a, b) => (b.applied_at || "").localeCompare(a.applied_at || ""));
   const more = tab === "shortlisted"
     ? `<div class="actions toolbar"><button onclick="act({action:'lead'})" ${l?.state === "working" ? "disabled" : ""}>Add 1 more lead</button></div>` : "";
   document.getElementById("list").innerHTML = more + (jobs.length ? jobs.map(card).join("") : `<p class="empty">Nothing here.</p>`);
@@ -156,6 +173,7 @@ function card(j) {
       <div>
         <div class="title">${esc(j.title)}</div>
         <div class="meta">${esc(j.company)} · ${esc(j.location || "location n/a")}${j.salary ? " · " + esc(j.salary) : ""} · via ${esc(j.source)}</div>
+        ${j.status === "applied" ? `<div class="applied-on">${j.applied_at ? `You applied on ${ddmmyyyy(j.applied_at)}` : "Applied (date not recorded)"}</div>` : ""}
       </div>
     </div>
     <div class="links">

@@ -14,7 +14,7 @@ from .applications import company_key, recent_companies
 from .filters import reject_reason
 from .llm import QuotaExhausted
 from .score import JobScore, score_jobs
-from .sources import enrich, fetch_all
+from .sources import enrich, fetch_all, load_boards, with_boards
 from .tailor import tailor
 
 log = logging.getLogger("job_search")
@@ -34,8 +34,13 @@ def load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text())
 
 
+def sources(config: dict) -> dict:
+    """config.yaml's sources plus the company boards `discover` found."""
+    return with_boards(config["sources"], load_boards(ROOT / "boards.yaml"))
+
+
 def cmd_fetch(conn: sqlite3.Connection, config: dict) -> None:
-    jobs = fetch_all(config["sources"])
+    jobs = fetch_all(sources(config))
     fresh = db.insert_new(conn, jobs)
     passed = []
     for job in fresh:
@@ -105,7 +110,7 @@ def next_leads(conn: sqlite3.Connection, config: dict, n: int) -> list[sqlite3.R
         "SELECT company FROM jobs WHERE status IN ('shortlisted', 'interested', 'applied')")}
     # One job per company, so a firm with several similar adverts can't take the whole shortlist.
     # Jobs already scored from a source since switched off shouldn't come back as leads.
-    enabled = {name for name, cfg in config["sources"].items() if cfg}
+    enabled = {name for name, cfg in sources(config).items() if cfg}
     rows = []
     for row in conn.execute(
         "SELECT * FROM jobs WHERE status = 'scored' AND score >= ? ORDER BY score DESC, posted_at DESC",
@@ -183,6 +188,7 @@ def main() -> None:
     p.add_argument("--job", help="regenerate this job id instead")
     sub.add_parser("stats", help="counts by status")
     sub.add_parser("run", help="fetch, score and tailor the shortlist")
+    sub.add_parser("discover", help="find company job boards to watch and write boards.yaml")
     p = sub.add_parser("serve", help="the review page")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
@@ -205,6 +211,10 @@ def main() -> None:
         cmd_tailor(conn, config, load_yaml(args.cv), getattr(args, "n", None), getattr(args, "job", None))
     if args.command == "stats":
         cmd_stats(conn)
+    if args.command == "discover":
+        from .discover import discover
+
+        discover(ROOT / "boards.yaml")
     if args.command == "serve":
         from .web import serve
 
