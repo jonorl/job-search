@@ -22,6 +22,8 @@
   header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 16px; }
   .today { font-weight: 600; padding: 4px 12px; border-radius: 999px; background: var(--chip); white-space: nowrap; }
   .today.done { color: var(--good); }
+  .tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px;
+    border-radius: 999px; border: 1px solid var(--good); color: var(--good); margin-left: 6px; vertical-align: 2px; }
   .applied-on { color: var(--good); font-size: 13px; margin-top: 2px; }
   nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
   nav button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px;
@@ -95,7 +97,16 @@ setInterval(() => document.querySelectorAll(".elapsed").forEach(el => {
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 async function load() {
-  const text = await (await fetch("api/jobs")).text();
+  const r = await fetch("api/jobs");
+  const text = await r.text();
+  if (!r.ok) {
+    // Without this a server error leaves a blank page with the cause only in the console.
+    document.getElementById("banner").innerHTML =
+      `<div class="banner error">The server answered ${r.status} ${esc(r.statusText)}; see its log. Retrying in 30s.</div>`;
+    clearTimeout(timer);
+    timer = setTimeout(load, 30000);
+    return;
+  }
   // Redrawing an unchanged list would only interrupt whatever the user is reading or typing.
   if (text !== last) {
     last = text;
@@ -171,7 +182,7 @@ function card(j) {
     <div class="head">
       <div class="score">${j.score}</div>
       <div>
-        <div class="title">${esc(j.title)}</div>
+        <div class="title">${esc(j.title)}${j.direct ? `<span class="tag" title="Only on the company's own job board so far">Direct</span>` : ""}</div>
         <div class="meta">${esc(j.company)} · ${esc(j.location || "location n/a")}${j.salary ? " · " + esc(j.salary) : ""} · via ${esc(j.source)}</div>
         ${j.status === "applied" ? `<div class="applied-on">${j.applied_at ? `You applied on ${ddmmyyyy(j.applied_at)}` : "Applied (date not recorded)"}</div>` : ""}
       </div>

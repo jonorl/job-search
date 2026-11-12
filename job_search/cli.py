@@ -2,9 +2,10 @@ import argparse
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import yaml
@@ -14,7 +15,7 @@ from .applications import company_key, recent_companies
 from .filters import reject_reason
 from .llm import QuotaExhausted
 from .score import JobScore, score_jobs
-from .sources import enrich, fetch_all, load_boards, with_boards
+from .sources import BOARDS, enrich, fetch_all, load_boards, with_boards
 from .tailor import tailor
 
 log = logging.getLogger("job_search")
@@ -39,6 +40,49 @@ def sources(config: dict) -> dict:
     return with_boards(config["sources"], load_boards(ROOT / "boards.yaml"))
 
 
+# Company boards list a job before the aggregators repost it, and a job only on its company's board
+# has fewer applicants; these rank it ahead of the rest.
+_BOARDS_SQL = ",".join(f"'{name}'" for name in BOARDS)
+DIRECT_SQL = f"(source IN ({_BOARDS_SQL}) AND on_aggregator IS NULL)"
+
+
+def is_direct(row) -> bool:
+    return row["source"] in BOARDS and row["on_aggregator"] is None
+
+
+def _title(title: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", title.lower()))
+
+
+def _same_title(a: str, b: str) -> bool:
+    # Himalayas cuts titles at 80 characters, so a prefix counts; the length floor keeps a bare
+    # "software engineer" from matching every longer title.
+    short, full = sorted((a, b), key=len)
+    return full.startswith(short) and (short == full or len(short) >= 25)
+
+
+def mark_on_aggregators(conn: sqlite3.Connection, fetched: list) -> int:
+    """Stamps company-board jobs that an aggregator also lists, from tonight's fetch or any earlier one."""
+    # By company_key, since aggregators shorten or extend names ("Kraken" / "Kraken Digital Asset Exchange").
+    seen: dict[str, set[str]] = {}
+    listings = [(j.company, j.title) for j in fetched if j.source not in BOARDS]
+    listings += [(r["company"], r["title"]) for r in conn.execute(
+        f"SELECT company, title FROM jobs WHERE source NOT IN ({_BOARDS_SQL})")]
+    for company, title in listings:
+        seen.setdefault(company_key(company), set()).add(_title(title))
+    now = datetime.now(UTC).isoformat()
+    marked = 0
+    for r in conn.execute(
+        f"SELECT id, company, title FROM jobs WHERE {DIRECT_SQL} AND status != 'filtered_out'"
+    ).fetchall():
+        title = _title(r["title"])
+        if any(_same_title(title, other) for other in seen.get(company_key(r["company"]), ())):
+            conn.execute("UPDATE jobs SET on_aggregator = ? WHERE id = ?", (now, r["id"]))
+            marked += 1
+    conn.commit()
+    return marked
+
+
 def cmd_fetch(conn: sqlite3.Connection, config: dict) -> None:
     jobs = fetch_all(sources(config))
     fresh = db.insert_new(conn, jobs)
@@ -52,15 +96,17 @@ def cmd_fetch(conn: sqlite3.Connection, config: dict) -> None:
         db.set_details(conn, job_id, **detail)
     conn.commit()
     log.info("fetched %d, new %d, passed filters %d", len(jobs), len(fresh), len(passed))
+    log.info("%d company-board jobs newly seen on aggregators", mark_on_aggregators(conn, jobs))
 
 
 def cmd_score(conn: sqlite3.Connection, config: dict, cv: dict, limit: int | None, rescore: bool) -> None:
     cfg = config["scoring"]
     # Rescoring is for after the CV or the scoring rules change; shortlisted and applied jobs are left alone.
     statuses = ("passed", "scored") if rescore else ("passed",)
+    # Direct-only jobs first, so a night's quota never runs out before reaching them.
     rows = conn.execute(
         f"""SELECT * FROM jobs WHERE status IN ({",".join("?" * len(statuses))})
-            ORDER BY posted_at DESC NULLS LAST LIMIT ?""",
+            ORDER BY {DIRECT_SQL} DESC, posted_at DESC NULLS LAST LIMIT ?""",
         (*statuses, limit or cfg["max_per_run"]),
     ).fetchall()
     # Scoring a company already applied to would only spend quota on a job that can't be shortlisted.
@@ -111,11 +157,15 @@ def next_leads(conn: sqlite3.Connection, config: dict, n: int) -> list[sqlite3.R
     # One job per company, so a firm with several similar adverts can't take the whole shortlist.
     # Jobs already scored from a source since switched off shouldn't come back as leads.
     enabled = {name for name, cfg in sources(config).items() if cfg}
+    # min_score stays the bar on the model's own score; the bonus only changes the order above it.
+    bonus = config["scoring"].get("direct_bonus", 0)
+    ranked = sorted(
+        conn.execute("SELECT * FROM jobs WHERE status = 'scored' AND score >= ?", (config["scoring"]["min_score"],)),
+        key=lambda r: (r["score"] + (bonus if is_direct(r) else 0), r["posted_at"] or ""),
+        reverse=True,
+    )
     rows = []
-    for row in conn.execute(
-        "SELECT * FROM jobs WHERE status = 'scored' AND score >= ? ORDER BY score DESC, posted_at DESC",
-        (config["scoring"]["min_score"],),
-    ):
+    for row in ranked:
         if row["source"] in enabled and company_key(row["company"]) not in taken:
             taken.add(company_key(row["company"]))
             rows.append(row)

@@ -54,6 +54,9 @@ scoring:
   max_per_run: 150
   shortlist_size: 5
   min_score: 60
+  # Added to a direct-only job's score when picking leads (one on its company's board that no aggregator
+  # lists), since fewer people will have seen it. Direct-only jobs are also scored first each night.
+  direct_bonus: 10
 
 tailoring:
   # Writing quality matters more here than at scoring, and it's only a handful of calls a day.

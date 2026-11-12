@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     score_detail TEXT,
     scored_at TEXT,
     -- Added by migrations/0001_applied_at.sql on existing databases.
-    applied_at TEXT
+    applied_at TEXT,
+    -- Added by migrations/0002_on_aggregator.sql on existing databases.
+    on_aggregator TEXT
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs (status);
 """

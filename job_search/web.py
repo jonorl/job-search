@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from . import db, llm
 from .applications import Sheet, SheetError
-from .cli import ROOT, next_leads, tailor_rows
+from .cli import ROOT, is_direct, next_leads, tailor_rows
 from .questions import answer, load_stock_answers
 
 log = logging.getLogger(__name__)
@@ -124,13 +124,15 @@ def jobs():
     try:
         items = []
         for job_id, folder in _outputs().items():
-            row = conn.execute("SELECT status, applied_at FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            row = conn.execute("SELECT status, applied_at, source, on_aggregator FROM jobs WHERE id = ?",
+                               (job_id,)).fetchone()
             data = json.loads((folder / "job.json").read_text())
             app_file = folder / "application.json"
             items.append({
                 **data,
                 "status": row["status"] if row else "unknown",
                 "applied_at": row["applied_at"] if row else None,
+                "direct": bool(row and is_direct(row)),
                 "folder": folder.relative_to(OUTPUT).as_posix(),
                 "files": sorted(p.name for p in folder.glob("*.pdf")),
                 "application": json.loads(app_file.read_text()) if app_file.exists() else None,
