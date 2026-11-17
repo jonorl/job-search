@@ -170,11 +170,13 @@ function card(j) {
   const pdfs = j.files.map(n => `<a href="${file(n)}" target="_blank">${esc(n.replace(/^.*?-(CV|Cover-Letter)\.pdf$/, "$1").replace("-", " "))}</a>`).join("");
   const actions = j.status === "shortlisted" ? `
       <button class="reject" onclick='act({id:${id},action:"reject"})'>Reject</button>
+      <button onclick='act({id:${id},action:"expired"})' title="The advert is gone or the link is dead">Expired</button>
       <button class="interested" onclick='act({id:${id},action:"interested"})'>Interested</button>
       <button class="applied" onclick='act({id:${id},action:"applied"})'>Applied</button>`
     : j.status === "interested" ? `
       <button class="applied" onclick='act({id:${id},action:"applied"})'>Applied</button>
       <button class="reject" onclick='act({id:${id},action:"reject"})'>Reject</button>
+      <button onclick='act({id:${id},action:"expired"})' title="The advert is gone or the link is dead">Expired</button>
       <button onclick='act({id:${id},action:"undo"})'>Back to review</button>`
     : `<button onclick='act({id:${id},action:"undo"})'>Back to review</button>`;
 

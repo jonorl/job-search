@@ -161,8 +161,10 @@ def action(a: Action):
     conn = db.connect()
     try:
         row = _row(conn, a.id)
-        if a.action == "reject":
-            db.set_status(conn, a.id, "rejected")
+        if a.action in ("reject", "expired"):
+            # A dead advert isn't a judgement on the job, so it goes with the unreviewed ones, not the rejects;
+            # either way a replacement lead keeps the day's count reachable.
+            db.set_status(conn, a.id, "rejected" if a.action == "reject" else "expired")
             _set_task("leads", state="working", message="Tailoring the next lead…")
             _leads.submit(_next_lead)
         elif a.action == "interested":
